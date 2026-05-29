@@ -1,0 +1,19 @@
+# Secrets — never commit (see CLAUDE.md §11)
+.env
+*.token
+*.key
+secrets/
+*.pem
+
+# n8n local
+.n8n/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Node (if any glue scripts get added)
+node_modules/
+npm-debug.log*
