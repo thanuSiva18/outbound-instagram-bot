@@ -33,6 +33,6 @@ in the workflow.
 
 ## Status of the deploy prerequisites
 - [x] n8n-mcp connected (local stdio `npx n8n-mcp`). *Note: tools only load after a Claude Code session reload — don't hot-load mid-session.*
-- [x] OpenAI credential created in n8n. → **need the exact credential name** to reference it.
-- [x] Google Sheets credential created in n8n. → **need the exact credential name** to reference it.
+- [x] OpenAI credential created in n8n. Name: **`OpenAi account`** (type: OpenAI).
+- [x] Google Sheets credential created in n8n. Name: **`Google Sheets account`** (type: Google Sheets OAuth2 API).
 - [x] Google **Sheet ID** + **tab name** confirmed (`1T89p6…JJio`, tab `leads` — see google-sheet-schema.md §0).
