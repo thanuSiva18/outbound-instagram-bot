@@ -1,18 +1,23 @@
 # Google Sheet setup — Outbound Travelers leads
 
-## 1. Create the sheet
-1. Create a new Google Sheet (in the Google account whose OAuth you'll connect to n8n).
-2. Name it e.g. **`Outbound Travelers — IG Leads`**.
-3. Rename the first tab to **`Leads`**.
-4. In **row 1**, create these **11 columns in this exact order** (header text must match exactly — the workflow maps by header name):
+## 0. Target sheet (CONFIRMED)
+- **Sheet ID:** `1T89p6LhpjwNJ_kqh5WT6DAj3Jt242Gs1JaTNzDCJJio`
+- **Tab:** `leads`
+- **File name:** "Testing new bot"
+
+The workflow's Google Sheets node is wired to this sheet/tab. The steps below
+document the column layout it expects — confirm row 1 of the `leads` tab matches.
+
+## 1. Sheet layout
+1. The sheet above already exists (OAuth'd Google account owns it).
+2. The tab is named **`leads`** (lowercase — the node matches the tab name exactly).
+3. In **row 1**, these **11 columns must exist in this exact order** (header text must match exactly — the workflow maps by header name):
 
 | A | B | C | D | E | F | G | H | I | J | K |
 |---|---|---|---|---|---|---|---|---|---|---|
 | `ig_user_id` | `ig_username` | `name` | `whatsapp_number` | `destination` | `pax` | `budget` | `status` | `first_contact_ts` | `last_update_ts` | `assigned_to` |
 
-5. Send me **(a) the Sheet ID** and **(b) the tab name** so I can wire the node.
-   - The Sheet ID is the long string in the URL:
-     `https://docs.google.com/spreadsheets/d/`**`<THIS_IS_THE_ID>`**`/edit`
+   - (Sheet ID + tab already provided — see §0 above.)
 
 ## 2. Column meaning
 - **`ig_user_id`** — Instagram user id from ManyChat. **This is the match key** for

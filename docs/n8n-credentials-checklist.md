@@ -31,8 +31,8 @@ in the workflow.
 
 ---
 
-## What I still need from you to finish the deploy
-- [ ] `N8N_MCP_TOKEN` set so I can connect n8n-mcp and deploy. *(in progress)*
-- [ ] OpenAI credential created in n8n → its **name**.
-- [ ] Google Sheets credential created in n8n → its **name**.
-- [ ] Google **Sheet ID** + **tab name** (see google-sheet-schema.md).
+## Status of the deploy prerequisites
+- [x] n8n-mcp connected (local stdio `npx n8n-mcp`). *Note: tools only load after a Claude Code session reload — don't hot-load mid-session.*
+- [x] OpenAI credential created in n8n. → **need the exact credential name** to reference it.
+- [x] Google Sheets credential created in n8n. → **need the exact credential name** to reference it.
+- [x] Google **Sheet ID** + **tab name** confirmed (`1T89p6…JJio`, tab `leads` — see google-sheet-schema.md §0).

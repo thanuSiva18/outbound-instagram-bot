@@ -31,14 +31,15 @@ Instagram DM → ManyChat (Default Reply, fires on EVERY msg) → n8n Webhook
 
 ## Config (decided)
 - **LLM:** OpenAI `gpt-4o-mini`, JSON response mode.
-- **Sheet:** new Google Sheet (schema in `docs/google-sheet-schema.md`).
-- **Credentials:** created by Faheem in the n8n UI (not from here).
+- **Sheet:** Google Sheet ID `1T89p6LhpjwNJ_kqh5WT6DAj3Jt242Gs1JaTNzDCJJio`, tab `leads` (file: "Testing new bot").
+- **n8n instance:** `https://n8n.srv1159219.hstgr.cloud`
+- **Credentials:** OpenAI (API key — automatable) + Google Sheets OAuth2 (needs your browser authorize). Secrets live in n8n's credential store only.
 
 ## Status / what's pending
 - [x] Repo + offline artifacts (prompt, code nodes, docs)
-- [ ] `N8N_MCP_TOKEN` set → connect n8n-mcp
-- [ ] OpenAI + Google Sheets credentials created in n8n
-- [ ] Google Sheet ID + tab name provided
+- [x] n8n-mcp connected (local stdio `npx n8n-mcp`) — *tools load only after a Claude Code session reload*
+- [x] OpenAI + Google Sheets credentials created in n8n *(exact names still needed to wire them)*
+- [x] Google Sheet ID + tab name confirmed (`1T89p6…JJio`, tab `leads`)
 - [ ] Workflow built, validated, deployed via n8n-mcp
 - [ ] ManyChat wired (Faheem) + end-to-end Tamil/Tanglish/English test
 
