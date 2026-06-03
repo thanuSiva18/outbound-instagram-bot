@@ -1,7 +1,12 @@
 # CLAUDE.md — Outbound Travelers · Instagram Lead-Capture Bot (n8n)
 
-> This file is the build brief for Claude Code. Read it fully before touching anything.
+> This file is the original **build brief** for Claude Code — kept for history and rationale.
 > When something here is marked **[CONFIRM]**, ask Faheem before building — do not assume.
+>
+> ⚠️ **For the current, reconciled state of the project (live flow IDs, credentials,
+> sheet schema, status), see [PROJECT.md](./PROJECT.md) — that is the source of truth.**
+> Where this brief and PROJECT.md disagree (e.g. this says default `gpt-4o`; the build
+> shipped `gpt-4o-mini`; the persona is now Rahul/Harshita, not "Priya"), PROJECT.md wins.
 
 ---
 
