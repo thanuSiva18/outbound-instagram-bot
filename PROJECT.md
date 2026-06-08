@@ -226,9 +226,11 @@ Chases quiet, incomplete leads automatically with **gentle, low-pressure** copy.
 > `last_update_ts` is newer than the nudge = they replied).
 
 ### Status (reconciled 2026-06-08)
-- ⚪ **Built & validated, currently INACTIVE** — cadence updated to **10 min / +30 min** and schedule
-  tightened to **every 2 min** (2026-06-08). Needs activation to go live (it will message real
-  non-qualified leads in the sheet on the first run — see activation note below).
+- 🟢 **LIVE / active** (activated 2026-06-08). Cadence **10 min / +30 min**, schedule every **2 min**,
+  field-specific gentle copy, loop-proof ledger. Skips qualified leads and leads with no missing field.
+- ⏳ **Confirm on first real nudge:** that ManyChat accepts `ig_user_id` as the Send-API `subscriber_id`
+  (a failed send is loop-safe — it routes to the no-op sink and the ledger still increments — but the
+  nudge won't deliver until the id is right). Check a `Send nudge (ManyChat)` execution result.
 - ✅ **ManyChat API credential exists** in n8n — `ManyChat API` (HTTP Header Auth, id `WRHI5I3GZm4zJCrl`), wired to the Send nudge node.
 - ✅ Timing set to **15 / 30 min**, schedule tightened to **5 min**, copy rewritten **gentle/non-pushy**, failed-send handling added (error output → no-op sink).
 - ✅ `n8n_validate_workflow` passes clean (0 errors).
