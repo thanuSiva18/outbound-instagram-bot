@@ -1,7 +1,10 @@
 // ─────────────────────────────────────────────────────────────────────────
 // NODE: "Parse + validate"  (Code node, "Run Once for All Items")
 // Parses the AI Agent JSON output, reads the classified `intent`, validates the
-// WhatsApp number, merges fields over known ones, and computes status.
+// WhatsApp number, merges fields over known ones, computes status, and keeps the
+// running "notes" summary (the bot's cross-message memory, saved to column
+// "notes - AI"). If the LLM omits notes, we keep the previous notes so memory is
+// never lost.
 //
 // Sheet stays LEAD-ONLY: only travel_lead (or an existing lead row) sets
 // is_lead=true; the downstream "Is lead?" IF node gates the Google Sheets write
@@ -32,7 +35,7 @@ try {
 
 // 3. Safe fallback — malformed JSON must not crash the flow.
 if (!parsed || typeof parsed !== 'object') {
-  parsed = { reply: 'Sorry, could you say that again? \u{1F642}', intent: 'customer_query', fields: {}, status: 'in_progress' };
+  parsed = { reply: 'Sorry, could you say that again? \u{1F642}', intent: 'customer_query', fields: {}, notes: '', status: 'in_progress' };
 }
 
 // 4. Validate intent.
@@ -51,9 +54,19 @@ const strip = (v) => { const t = (v === undefined || v === null) ? '' : String(v
 function cleanPhone(v) {
   if (!v) return '';
   let d = String(v).replace(/\D/g, '');
-  if (d.length === 12 && d.startsWith('91')) d = d.slice(2);
-  if (d.length === 11 && d.startsWith('0'))  d = d.slice(1);
-  return d.length === 10 ? d : '';
+  // Indian 10-digit mobile (optionally written with 91 / 0 / +91) -> '+91 9xxxx xxxxx'.
+  // The Save lead node's whatsapp_number mapping prepends a "'" so Google Sheets keeps the
+  // leading + as TEXT instead of evaluating it as a formula (which would drop the +).
+  let in10 = d;
+  if (in10.length === 12 && in10.startsWith('91')) in10 = in10.slice(2);
+  else if (in10.length === 11 && in10.startsWith('0')) in10 = in10.slice(1);
+  if (in10.length === 10 && /^[6-9]/.test(in10)) return '+91 ' + in10.slice(0, 5) + ' ' + in10.slice(5);
+  // International number (came with its own country code / + sign, e.g. +971 UAE) -> keep it, with the +
+  const hadPlus = String(v).trim().charAt(0) === '+';
+  if (d.startsWith('00')) d = d.slice(2); // 00-prefix international dialling -> drop the 00
+  if (hadPlus || (d.length >= 11 && d.length <= 15)) return '+' + d;
+  // anything else looks like junk -> empty so the bot re-asks once
+  return '';
 }
 
 // 5. Merge. For non-travel intents, don't let the LLM invent lead data — keep
@@ -67,20 +80,32 @@ for (const f of FIELDS) {
 }
 merged.whatsapp_number = cleanPhone(merged.whatsapp_number);
 
-// 6. Status: qualified once the QUALIFY fields are in; in_progress if anything
+// 6. Notes (running summary = cross-message memory). Take the LLM's fresh summary
+//    when it gave one; otherwise keep the previous notes so memory is never lost.
+const newNotes = strip(parsed.notes);
+const prevNotes = strip(norm.existing_notes);
+const notes = newNotes !== '' ? newNotes : prevNotes;
+
+// 6b. Lead source — set ONCE on first contact, then preserved (like first_contact_ts).
+//     Prefer the value already saved on the row; else the source ManyChat sent now.
+const source = strip(norm.existing_source) || strip(norm.lead_source);
+const fromReel = !!(source && /reel|comment/i.test(source));
+
+// 7. Status: qualified once the QUALIFY fields are in; in_progress if anything
 //    is captured; new otherwise.
 const qualified = QUALIFY.every((f) => merged[f] && merged[f] !== '');
 const anyFilled = FIELDS.some((f) => merged[f] && merged[f] !== '');
 const status = qualified ? 'qualified' : (anyFilled ? 'in_progress' : 'new');
 
-// 7. Timestamps; preserve original first_contact_ts if the row existed.
+// 8. Timestamps; preserve original first_contact_ts if the row existed.
 const nowIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
 const firstContact = (norm.existing_first_contact_ts && String(norm.existing_first_contact_ts).trim()) || nowIST;
 
-// 8. is_lead → gates the sheet write. True for travel_lead, or if a lead row
-//    already exists for this user (so we keep updating it).
+// 9. is_lead → gates the sheet write. True for travel_lead, if a lead row already
+//    exists for this user (so we keep updating it), OR if it came from a reel comment
+//    (those are leads by definition, even if the LLM mis-classifies the message).
 const hadRow = FIELDS.some((f) => strip(knownF[f]) !== '');
-const isLead = (intent === 'travel_lead') || hadRow;
+const isLead = (intent === 'travel_lead') || hadRow || fromReel;
 
 return [{
   json: {
@@ -94,6 +119,8 @@ return [{
     destination:     merged.destination,
     pax:             merged.pax,
     budget:          merged.budget,
+    notes,
+    source,
     status,
     first_contact_ts: firstContact,
     last_update_ts:  nowIST,
