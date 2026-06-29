@@ -9,11 +9,6 @@
 // Sheet stays LEAD-ONLY: only travel_lead (or an existing lead row) sets
 // is_lead=true; the downstream "Is lead?" IF node gates the Google Sheets write
 // so career / office_info / casual customer_query never create rows.
-//
-// RESILIENCE: the AI Agent's error output is wired into this node too. When the
-// LLM fails (e.g. OpenAI down/quota), $json has no `output`, so `parsed` falls
-// back to the friendly "our team will get back to you" message below — the
-// webhook still responds and the ManyChat repeat-loop can't happen.
 // ⚠️ Code node MUST return [{ json: { ... } }].
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -38,7 +33,7 @@ try {
   if (cleaned) parsed = JSON.parse(cleaned);
 } catch (e) { parsed = null; }
 
-// 3. Safe fallback — malformed JSON / AI failure must not crash the flow.
+// 3. Safe fallback — malformed JSON must not crash the flow.
 if (!parsed || typeof parsed !== 'object') {
   parsed = { reply: 'Thanks so much for messaging Outbound Travelers! \u{1F60A} Our team will get back to you very shortly.', intent: 'customer_query', fields: {}, notes: '', status: 'in_progress' };
 }

@@ -66,6 +66,39 @@ In the External Request **Response mapping**:
   (`fields.name` → `name`, `fields.whatsapp_number` → `whatsapp_number`, etc.).
   This is the entire memory mechanism — next message carries the updated state.
 
+## 4b. ⚠️ REQUIRED — the `PENDING` reply gate (do NOT skip)
+n8n uses the sentinel reply **`PENDING`** for messages that must NOT be sent:
+(a) a slow/failed turn, and (b) the **losers of a rapid-message burst** (the dedup lock
+lets only ONE of several simultaneous DMs reply; the rest return `reply:"PENDING"`).
+So the **Send Message must only fire when `reply` is NOT `PENDING`**, or customers will
+literally receive the word "PENDING" and bursts will still double.
+
+Setup (in the Default Reply / "AI agent automation" flow):
+1. **Before** the External Request, add a **Set Custom Field** action → set `bot reply`
+   to `PENDING`.
+2. The External Request's Response-mapping writes `reply` → `bot reply` (as above).
+3. **Between** the request and the Send Message, add a **Condition**:
+   `bot reply` **is not** `PENDING` → true → **Send Message**; the *If not* branch goes
+   nowhere (sends nothing).
+
+This single gate covers both the slow-reply silence fix AND the burst-dedup. It must be
+**published** for the dedup to work end-to-end.
+
+## 4c. ⚙️ ARCHITECTURE NOTE — replies are now delivered ASYNC (by n8n, not the webhook response)
+As of the async rebuild, the n8n webhook **always returns `{"reply":"PENDING"}` instantly**
+(sub-second), so:
+- ManyChat's own **Send Message step never fires** (bot reply is always `PENDING` → the gate
+  in §4b blocks it). That's intentional — leave the Send Message + gate in place; they just
+  stay silent now.
+- n8n delivers the real reply itself, by calling the **ManyChat Send API**
+  (`api.manychat.com/fb/sending/sendContent`, the "ManyChat API" credential) once the AI is
+  done — only for the ONE winner of a burst.
+
+Why: the instant ack means (1) ManyChat stops queuing rapid messages ~10s apart, so a burst
+arrives together and the dedup lock can pick a single winner; and (2) a slow AI turn can take
+15s+ without ever timing out / going silent. Nothing to configure on the ManyChat side beyond
+the §4b gate — but DON'T delete the gate, or PENDING acks would be sent as real messages.
+
 ## 5. Confirm
 - Test a DM. Confirm the request fires on **every** message (not just flow completion).
 - Confirm fields persist between messages (send a name, then on the next message it

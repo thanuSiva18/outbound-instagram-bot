@@ -28,19 +28,43 @@ Instagram DM → ManyChat (Default Reply, fires on EVERY msg) → n8n Webhook
 ## The 5 fields
 `name`, `whatsapp_number` (10-digit Indian), `destination`, `pax`, `budget` (per-person/total).
 
-## Repo layout
+## Repo layout (multi-account)
+**One shared brain, many Instagram accounts.** Shared logic lives once in `shared/`;
+everything that differs per IG account lives in `accounts/<name>/account.md`.
+
+```
+shared/
+  prompts/system_prompt.md            # the conversation brain (readable copy of the Normalize prompt)
+  workflow-code/normalize.js          # Normalize Code node — known fields + full system prompt
+  workflow-code/parse_validate.js     # Parse Code node — JSON parse, phone validate, merge, status, AI-failure fallback
+accounts/
+  outbound-travelers-main/            # MAIN @outboundtravelers page — AI bot mO9gd0VJISdzlB5x (migrating; page still on "My workflow")
+    account.md                        # this account's IG / n8n / sheet / credential ids
+    GO-LIVE-RUNBOOK.md                # migration plan + cutover order
+    manychat-setup.md                 # ManyChat wiring for this account
+  outbound-travelers-in/              # the .in page — LIVE AI bot AfmPZXhWMetbxHTl
+    account.md
+    chat-and-capture.workflow.json    # human-readable reference (canonical = live n8n)
+docs/                                 # shared reference (sheet schema, manychat, crm, creds)
+```
+
 | path | what |
 |------|------|
-| `workflow/chat-and-capture.workflow.json` | **importable export of the live workflow** (synced from n8n 2026-06-19). OpenAI credential id is a placeholder — set it after import. |
-| `prompts/system_prompt.md` | the conversation brain — readable copy of the prompt embedded in `Normalize input` |
-| `workflow/code/normalize.js` | Normalize Code node — builds known fields + the full system prompt |
-| `workflow/code/parse_validate.js` | Parse Code node — JSON parse, phone validate, merge, status, graceful AI-failure fallback |
-| `docs/google-sheet-schema.md` | new-sheet columns + Sheet ID request |
+| `shared/` | the brain + code, identical across all accounts |
+| `accounts/<name>/account.md` | per-account config: IG handle, n8n workflow id, webhook path, sheet id, credential ids |
+| `accounts/<name>/chat-and-capture.workflow.json` | reference snapshot of that account's workflow |
+| `docs/google-sheet-schema.md` | leads-sheet columns + Sheet ID |
+| `docs/manychat-setup.md` | ManyChat wiring steps (applied per account) |
+| `docs/crm-integration-contract.md` | bot → CRM push contract |
 | `docs/n8n-credentials-checklist.md` | OpenAI + Google OAuth creds to create in n8n |
-| `docs/manychat-setup.md` | manual ManyChat wiring steps for Faheem |
+
+> **Adding another IG account (same business)?** Duplicate the n8n workflow, give it a
+> **unique webhook path** + its **own ManyChat credential** + its **own sheet**, reuse the
+> shared OpenAI/Google creds, then drop an `account.md` under `accounts/<new>/`.
+> Template: [`accounts/outbound-travelers-in/account.md`](accounts/outbound-travelers-in/account.md).
 
 ## Re-deploying / restoring the workflow
-1. In n8n: **Workflows → Import from File →** `workflow/chat-and-capture.workflow.json`.
+1. In n8n: **Workflows → Import from File →** `accounts/<name>/chat-and-capture.workflow.json`.
 2. Open **OpenAI Chat Model** + the two Google Sheets nodes and pick your credentials
    (the OpenAI cred id is intentionally a placeholder — no secrets are committed).
 3. Activate.
@@ -56,11 +80,13 @@ Instagram DM → ManyChat (Default Reply, fires on EVERY msg) → n8n Webhook
 ## Status
 - [x] Repo + offline artifacts (prompt, code nodes, docs)
 - [x] OpenAI + Google Sheets credentials created in n8n
-- [x] Google Sheet ID + tab name confirmed (`1T89p6…JJio`, tab `leads`)
-- [x] Workflow built, validated, deployed (n8n id `AfmPZXhWMetbxHTl`) — **live**
-- [x] Error-output resilience added (no more repeat-loop on AI failure)
-- [x] Repo synced from live workflow (2026-06-19)
-- [ ] ManyChat wired + end-to-end Tamil/Tanglish/English test
+- [x] `.in` sheet confirmed (`1T89p6…JJio`, tab `leads`)
+- [x] Main sheet provided (`19qt6m…va5IuY`, tab `leads`) — confirm headers/share
+- [x] `.in` workflow built, validated, deployed (`AfmPZXhWMetbxHTl`) — **live**
+- [x] Main workflow built, validated (`mO9gd0VJISdzlB5x`) — **inactive** until go-live
+- [x] Async reply + burst dedup (Claim lock / Read lock / Winner? / Send reply)
+- [x] Repo synced from live workflows (2026-06-29)
+- [ ] Main + Messenger ManyChat wiring + end-to-end test
 
 ## Secrets
 Never commit secrets (see CLAUDE.md §11). They live in Claude Code's MCP config
