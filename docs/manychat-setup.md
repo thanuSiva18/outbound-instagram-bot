@@ -30,7 +30,7 @@ ManyChat → **Settings → Fields → Custom User Fields → + New Field**. Cre
   that's what fixes the old capture gap).
 - Inside it, add an **External Request** (Actions → External Request / Dynamic block).
 - **Method:** `POST`
-- **URL:** `<the n8n webhook URL I will give you>`
+- **URL:** `https://n8n.srv1159219.hstgr.cloud/webhook/ig-lead-bot`
 - **Headers:** `Content-Type: application/json`
 - **Body (JSON):** send the message text, the IG identifiers, and **all current field
   values** every time:

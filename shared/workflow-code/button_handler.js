@@ -74,5 +74,7 @@ return [{
     crm_push:            crmPush,
     first_contact_ts:    firstContact,
     last_update_ts:      nowIST,
+    assigned_to:         '',
+    msg_id:              norm.msg_id || '',
   },
 }];

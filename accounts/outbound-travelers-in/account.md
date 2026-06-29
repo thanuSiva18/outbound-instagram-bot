@@ -22,16 +22,18 @@ Rahul persona** with a fixed collection order:
 ## n8n
 - Instance: `https://n8n.srv1159219.hstgr.cloud`
 - Project: Outbound Travelers (`outboundtravelers1@gmail.com`)
-- Workflow: **"Outbound IG Lead Bot — 1 · Chat & Capture"** (`AfmPZXhWMetbxHTl`) — **ACTIVE**
+- Workflow: **"Outbound IG Lead Bot — 1 · Chat & Capture"** (`AfmPZXhWMetbxHTl`) — **INACTIVE until ManyChat wiring is updated**
 - Webhook path: `ig-lead-bot`
   → URL `https://n8n.srv1159219.hstgr.cloud/webhook/ig-lead-bot`
 - Error workflow: "Error Alerts" (`f8JebCcUmgk137Li`)
 - Companion flows: CRM Sync (`yH0weFfeYiobqdZq`), Comment Seed (`9y02z4wHfm1y4Q6V`)
+- Test workflow: `N1D44nSBQjAyo2CQ`, webhook `ig-lead-bot-rahul-test` (inactive, used for safe validation)
 
 ## Leads store (Google Sheet)
-- File: **"Testing new bot"** (`1T89p6LhpjwNJ_kqh5WT6DAj3Jt242Gs1JaTNzDCJJio`), tab `leads`
+- File: **"Testing new bot"** (`1T89p6LhpjwNJ_kqh5WT6DAj3Jt242Gs1JaTNzDCJJio`), tab `leads_v2`
 - Columns A–M per [`../../docs/google-sheet-schema.md`](../../docs/google-sheet-schema.md)
   (`assigned_to` doubles as the dedup-lock cell)
+- Old `leads` tab remains as an archive of pre-Rahul data (280 rows migrated to `leads_v2`)
 - Google Sheets credential in n8n: **"Google Sheets account"** (`Bnb4dKAXJwcqzUWj`)
 
 ## LLM

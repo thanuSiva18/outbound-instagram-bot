@@ -4,12 +4,14 @@
 
 | Account | Sheet ID | Tab | File name | Columns |
 |---|---|---|---|---|
-| `.in` Instagram (`AfmPZXhWMetbxHTl`) | `1T89p6LhpjwNJ_kqh5WT6DAj3Jt242Gs1JaTNzDCJJio` | `leads` | "Testing new bot" | 13 (A–M) |
+| `.in` Instagram (`AfmPZXhWMetbxHTl`) | `1T89p6LhpjwNJ_kqh5WT6DAj3Jt242Gs1JaTNzDCJJio` | `leads_v2` | "Testing new bot" | 13 (A–M) |
 | Main Instagram / Facebook (`mO9gd0VJISdzlB5x`) | `19qt6mTAmEDRVVZY_F26A1Xvee7JyjiGbmWcz0va5IuY` | `leads` | (main leads sheet) | 13 (A–M) |
 
 Both sheets must be shared (Editor) with the Google account behind credential `Bnb4dKAXJwcqzUWj` (`outboundtravelers1@gmail.com`).
 
 The workflow's Google Sheets nodes match by header name, so the header text in row 1 must match exactly.
+
+> **Migration note:** the `.in` account previously used a `leads` tab with the old Zayn schema (`name`, `budget`, no `travel_date`/`quick_assistance`). On 2026-06-29 all 280 existing rows were migrated to a new `leads_v2` tab with the Rahul schema below. The old `leads` tab is kept as an archive and is no longer written to.
 
 ---
 
