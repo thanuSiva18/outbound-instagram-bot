@@ -18,3 +18,11 @@ Thumbs.db
 node_modules/
 npm-debug.log*
 .n8n-build/
+
+# Untracked local artifacts
+.agents/
+n8n-mcp-2/
+n8n-skills/
+accounts/outbound-travelers-whatsapp/
+activate_whatsapp_workflow.js
+deploy_whatsapp_workflow.js
