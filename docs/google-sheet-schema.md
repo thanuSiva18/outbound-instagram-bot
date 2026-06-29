@@ -4,7 +4,7 @@
 
 | Account | Sheet ID | Tab | File name | Columns |
 |---|---|---|---|---|
-| `.in` Instagram (`AfmPZXhWMetbxHTl`) | `1T89p6LhpjwNJ_kqh5WT6DAj3Jt242Gs1JaTNzDCJJio` | `leads` | "Testing new bot" | 12 (A–L) |
+| `.in` Instagram (`AfmPZXhWMetbxHTl`) | `1T89p6LhpjwNJ_kqh5WT6DAj3Jt242Gs1JaTNzDCJJio` | `leads` | "Testing new bot" | 13 (A–M) |
 | Main Instagram / Facebook (`mO9gd0VJISdzlB5x`) | `19qt6mTAmEDRVVZY_F26A1Xvee7JyjiGbmWcz0va5IuY` | `leads` | (main leads sheet) | 13 (A–M) |
 
 Both sheets must be shared (Editor) with the Google account behind credential `Bnb4dKAXJwcqzUWj` (`outboundtravelers1@gmail.com`).
@@ -13,13 +13,13 @@ The workflow's Google Sheets nodes match by header name, so the header text in r
 
 ---
 
-## 1. `.in` account sheet layout — 12 columns
+## 1. `.in` account sheet layout — 13 columns (Rahul scripted flow)
 
 Row 1 must contain these headers in this exact order:
 
-| A | B | C | D | E | F | G | H | I | J | K | L |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| `ig_user_id` | `ig_username` | `name` | `whatsapp_number` | `destination` | `pax` | `budget` | `status` | `first_contact_ts` | `last_update_ts` | `assigned_to` | `notes - AI` |
+| A | B | C | D | E | F | G | H | I | J | K | L | M |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `ig_user_id` | `ig_username` | `destination` | `normalized_destination` | `travel_date` | `pax` | `whatsapp_number` | `status` | `quick_assistance` | `first_contact_ts` | `last_update_ts` | `assigned_to` | `notes - AI` |
 
 ## 2. Main account sheet layout — 13 columns
 
@@ -27,14 +27,21 @@ The main-account bot is channel-aware (Instagram + Facebook Messenger), so it wr
 
 | A | B | C | D | E | F | G | H | I | J | K | L | M |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `ig_user_id` | `ig_username` | `name` | `whatsapp_number` | `destination` | `pax` | `budget` | `status` | `first_contact_ts` | `last_update_ts` | `assigned_to` | `notes - AI` | `channel` |
+| `ig_user_id` | `ig_username` | `destination` | `normalized_destination` | `travel_date` | `pax` | `whatsapp_number` | `status` | `quick_assistance` | `first_contact_ts` | `last_update_ts` | `assigned_to` | `notes - AI` |
+
+For the main account, the workflow also writes `channel` in column N. The Rahul `.in` flow does **not** write `channel`.
 
 ## 3. Column meaning
 
 - **`ig_user_id`** — ManyChat user id. **This is the match key** for Append-or-Update: first message creates the row; every later message updates the *same* row. No lead is ever lost.
 - **`ig_username`** — ManyChat username (may be blank for Facebook Messenger).
-- **`name` / `whatsapp_number` / `destination` / `pax` / `budget`** — the 5 lead fields the bot collects.
-- **`status`** — `new` → `in_progress` → `qualified`. Flips to `qualified` only when all 5 fields are filled. **This flip is the handoff trigger** for downstream CRM / Tele-Sales automation.
+- **`destination`** — the destination exactly as the user typed it.
+- **`normalized_destination`** — canonical/normalized destination name (e.g. "Jammu" / "Kashmir" → "Jammu and Kashmir").
+- **`travel_date`** — when the user plans to travel, stored as free text.
+- **`pax`** — number of travellers.
+- **`whatsapp_number`** — contact number in `+91 xxxxx xxxxx` format.
+- **`status`** — `new` → `in_progress` → `qualified`. Flips to `qualified` once destination, travel_date, pax, and whatsapp_number are filled.
+- **`quick_assistance`** — `yes`, `no`, or empty. Set after the user clicks the Yes/No quick-assistance button.
 - **`first_contact_ts` / `last_update_ts`** — IST timestamps, `YYYY-MM-DD HH:MM:SS`. `first_contact_ts` is preserved from the very first message; `last_update_ts` is refreshed every message.
 - **`assigned_to`** — **⚠️ CURRENTLY DOUBLES AS THE DEDUP LOCK CELL** (see §4). Each incoming message overwrites it with a one-shot lock token (`L<ts>-<rand>`), so it is NOT free for routing yet. Before you build routing, move the lock to a dedicated `lock_msg_id` column (§4) so `assigned_to` is freed.
 - **`notes - AI`** — a short running summary written by the AI each turn. Human-readable context for handoff.

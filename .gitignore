@@ -17,3 +17,4 @@ Thumbs.db
 # Node (if any glue scripts get added)
 node_modules/
 npm-debug.log*
+.n8n-build/

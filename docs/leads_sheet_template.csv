@@ -1,1 +1,1 @@
-ig_user_id,ig_username,name,whatsapp_number,destination,pax,budget,status,first_contact_ts,last_update_ts,assigned_to,notes - AI,channel
+ig_user_id,ig_username,destination,normalized_destination,travel_date,pax,whatsapp_number,status,quick_assistance,first_contact_ts,last_update_ts,assigned_to,notes - AI

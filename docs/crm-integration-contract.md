@@ -25,18 +25,22 @@ Content-Type: application/json
   Compute the HMAC in a Code node before the HTTP Request node. Secret shared out-of-band.
 
 ## When we push
-Exactly **once per lead**, on the single message where it first becomes `qualified`
-(all 5 fields filled). Driven by the `crm_push` flag from `Parse + validate`
-(`crmPush = qualified && !wasQualified`). We never push on later messages.
+For the **Rahul scripted `.in` flow**, we push on the **Yes** quick-assistance button click.
+The lead already has all four core fields (destination, travel_date, pax, whatsapp_number)
+by that point, so the CRM receives a complete lead with `quick_assistance: yes`.
+
+For the **legacy Zayn / main-account flows** (until migrated), the push still fires on the
+first message where all 5 legacy fields become filled (`crm_push = qualified && !wasQualified`).
+
 The CRM *also* dedupes (phone OR handle, open lead, last 14 days) as a backstop.
 
 ## Where this lives in n8n (the actual build)
 Two workflows on `n8n.srv1159219.hstgr.cloud`:
-- **Flow 1 — "Chat & Capture"** (`AfmPZXhWMetbxHTl`): on `crm_push`, the **Push to CRM**
-  node POSTs the lead to the internal webhook `/webhook/crm-lead-sync`. Body now carries
-  `name, contact_number, destination, travelers, budget, ig_username, ig_user_id, status, notes`.
+- **Flow 1 — "Chat & Capture"** (`AfmPZXhWMetbxHTl`): the **Push to CRM** node POSTs the
+  lead to the internal webhook `/webhook/crm-lead-sync` when `crm_push === true` OR
+  `quick_assistance === 'yes'`.
 - **Flow 3 — "CRM Sync"** (`yH0weFfeYiobqdZq`): `Webhook → Normalize for CRM` (coerces
-  budget→number, pax→int, phone→digits) then **fans out to two HTTP nodes**:
+  phone→digits, pax→int) then **fans out to two HTTP nodes**:
   - `Send to CRM` → Workpex (old CRM) — *still active during transition*.
   - `Send to Outbound CRM` → the new endpoint below — **dual-write**.
 
@@ -45,35 +49,35 @@ Two workflows on `n8n.srv1159219.hstgr.cloud`:
   `Send to CRM` node — nothing else changes.
 
 ## Field mapping (bot → CRM body)
-| Bot field (Parse+validate) | CRM field        | Type        | Transform |
-|----------------------------|------------------|-------------|-----------|
-| `name`                     | `contactName`    | string      | as-is |
-| `ig_username`              | `handle`         | string      | as-is — **dedup key** |
-| `whatsapp_number`          | `phone`          | string      | strip spaces — **dedup key** |
-| `destination`              | `destination`    | string      | as-is |
-| `budget`                   | `budget`         | **number**  | coerce `"50k"`→`50000`, `"1.5L"`→`150000`; **omit if not numeric** (e.g. "medium / flexible") |
-| `ig_user_id`               | `rawPayload.ig_user_id` | —    | no CRM column — preserved in rawPayload |
-| `pax`                      | `rawPayload.pax` | —           | no CRM column — preserved in rawPayload |
-| `budget` (original text)   | `rawPayload.budget_text` | —    | keep per-person/total wording for sales |
-| `status`                   | `rawPayload.bot_status`  | —    | CRM ignores top-level status (forces captured/New) |
-| `notes`                    | `rawPayload.notes`       | —    | the running lead summary, handy at handoff |
+| Bot field | CRM field | Type | Transform |
+|---|---|---|---|
+| `ig_username` | `handle` | string | as-is — **dedup key** |
+| `whatsapp_number` | `phone` | string | strip spaces — **dedup key** |
+| `normalized_destination` / `destination` | `destination` | string | prefer normalized; fallback to raw |
+| `travel_date` | `travel_date` | string | as-is, free text |
+| `pax` | `travelers` | string | as-is |
+| `quick_assistance` | `quick_assistance` | string | `yes` / `no` / empty |
+| `ig_user_id` | `rawPayload.ig_user_id` | — | no CRM column — preserved in rawPayload |
+| `pax` | `rawPayload.pax` | — | original text preserved |
+| `status` | `rawPayload.bot_status` | — | CRM ignores top-level status (forces captured/New) |
+| `notes` | `rawPayload.notes` | — | the running lead summary, handy at handoff |
 
-**Required:** at least one of `phone` / `handle`. We always have both at qualify time.
+**Required:** at least one of `phone` / `handle`. We always have both at push time.
 
-## Example body we send
+## Example body we send (Rahul flow, Yes click)
 ```json
 {
-  "contactName": "Priya Nair",
   "handle": "priya.travels",
   "phone": "+919876543210",
-  "destination": "Maldives",
-  "budget": 150000,
+  "destination": "Jammu and Kashmir",
+  "travel_date": "15th August",
+  "travelers": "4",
+  "quick_assistance": "yes",
   "rawPayload": {
     "ig_user_id": "17841400000000000",
-    "pax": 2,
+    "pax": "4",
     "bot_status": "qualified",
-    "budget_text": "1.5L total",
-    "notes": "• LEAD: Maldives, 2 pax, 1.5L ..."
+    "notes": "Bali trip, 15 Aug, 4 pax, asked for quick assistance"
   }
 }
 ```
@@ -90,9 +94,9 @@ Two workflows on `n8n.srv1159219.hstgr.cloud`:
 - [ ] **Phone format:** we send **digits only with country code** (e.g. `919876543210`,
       via Flow 3 `Normalize for CRM`), not bare 10-digit. Confirm the CRM stores/searches
       that form. (Handle is the reliable dedup key regardless.)
-- [ ] **Vague budget → `0`:** "medium / flexible" budgets serialize to `budget: 0`
-      (original wording preserved in `rawPayload.budget_text`). Confirm the CRM treats
-      `0` as "unknown", not a real ₹0 lead that scores cold.
+- [ ] **`contactName` missing:** the Rahul flow no longer collects `name`. We send `handle`
+      instead of `contactName`. Confirm the CRM accepts a missing/empty `contactName`.
+- [ ] **`quick_assistance` field:** confirm the CRM accepts and stores this tag.
 - [ ] Turn on `META_APP_SECRET` + HMAC signing before go-live (currently open endpoint).
       When enabled, we add a Code node before `Send to Outbound CRM` to sign the raw body.
 - [ ] (Optional) Add a `crm_id` column to the leads sheet + write back `results[0].id`.

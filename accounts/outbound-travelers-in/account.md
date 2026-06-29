@@ -1,9 +1,13 @@
-# Outbound Travelers — `.in` page  (live AI bot)
+# Outbound Travelers — `.in` page  (live AI bot — Rahul scripted flow)
 
-The **`.in`** Instagram page's bot — the AI bot we built first, currently **live**. Same business,
-persona = **Zayn**. (The *main* @outboundtravelers page is in [`../outbound-travelers-main/`](../outbound-travelers-main/).)
-This file records ONLY what is unique to this account — all shared brain/logic lives
-in [`../../shared/`](../../shared/) and the docs in [`../../docs/`](../../docs/).
+The **`.in`** Instagram page's bot — currently **live**. This version uses a **scripted
+Rahul persona** with a fixed collection order:
+
+1. destination
+2. travel_date
+3. pax
+4. whatsapp_number
+5. quick-assistance Yes/No button
 
 > Canonical source of truth = the **live n8n workflow** (`AfmPZXhWMetbxHTl`). The JSON
 > in this folder is a human-readable reference; for a byte-perfect backup use n8n's own
@@ -26,7 +30,7 @@ in [`../../shared/`](../../shared/) and the docs in [`../../docs/`](../../docs/)
 
 ## Leads store (Google Sheet)
 - File: **"Testing new bot"** (`1T89p6LhpjwNJ_kqh5WT6DAj3Jt242Gs1JaTNzDCJJio`), tab `leads`
-- Columns A–L per [`../../docs/google-sheet-schema.md`](../../docs/google-sheet-schema.md)
+- Columns A–M per [`../../docs/google-sheet-schema.md`](../../docs/google-sheet-schema.md)
   (`assigned_to` doubles as the dedup-lock cell)
 - Google Sheets credential in n8n: **"Google Sheets account"** (`Bnb4dKAXJwcqzUWj`)
 
@@ -35,7 +39,7 @@ in [`../../shared/`](../../shared/) and the docs in [`../../docs/`](../../docs/)
 - Model: `gpt-4o-mini`, JSON response mode, temperature 0.35
 
 ## CRM
-- Push on qualify only → POST `https://n8n.srv1159219.hstgr.cloud/webhook/crm-lead-sync`
+- Push on **Yes** quick-assistance click → POST `https://n8n.srv1159219.hstgr.cloud/webhook/crm-lead-sync`
 - Source tag: `instagram`
 - Contract: [`../../docs/crm-integration-contract.md`](../../docs/crm-integration-contract.md)
 

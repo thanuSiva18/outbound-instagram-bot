@@ -1,20 +1,14 @@
 // ─────────────────────────────────────────────────────────────────────────
 // NODE: "Parse + validate"  (Code node, "Run Once for All Items")
-// Parses the AI Agent JSON output, reads the classified `intent`, validates the
-// WhatsApp number, merges fields over known ones, computes status, and keeps the
-// running "notes" summary (the bot's cross-message memory, saved to column
-// "notes - AI"). If the LLM omits notes, we keep the previous notes so memory is
-// never lost.
-//
-// Sheet stays LEAD-ONLY: only travel_lead (or an existing lead row) sets
-// is_lead=true; the downstream "Is lead?" IF node gates the Google Sheets write
-// so career / office_info / casual customer_query never create rows.
+// Parses the AI Agent JSON output for the new Rahul scripted flow.
+// Validates the WhatsApp number, merges fields over known ones, computes
+// status, and keeps the running one-line notes summary.
 // ⚠️ Code node MUST return [{ json: { ... } }].
 // ─────────────────────────────────────────────────────────────────────────
 
-// All 5 are mandatory — a lead is "qualified" only once every one is captured.
-const QUALIFY = ['name', 'destination', 'pax', 'budget', 'whatsapp_number'];
-const FIELDS = ['name', 'whatsapp_number', 'destination', 'pax', 'budget'];
+// Core 4 fields. A lead is "qualified" once all four are captured.
+const QUALIFY = ['destination', 'travel_date', 'pax', 'whatsapp_number'];
+const FIELDS = ['destination', 'normalized_destination', 'travel_date', 'pax', 'whatsapp_number'];
 
 // 1. Grab the raw LLM text (AI Agent → $json.output; other shapes as fallback).
 const up = $json || {};
@@ -33,9 +27,16 @@ try {
   if (cleaned) parsed = JSON.parse(cleaned);
 } catch (e) { parsed = null; }
 
-// 3. Safe fallback — malformed JSON must not crash the flow.
+// 3. Safe fallback — malformed JSON / AI failure must not crash the flow.
 if (!parsed || typeof parsed !== 'object') {
-  parsed = { reply: 'Thanks so much for messaging Outbound Travelers! \u{1F60A} Our team will get back to you very shortly.', intent: 'customer_query', fields: {}, notes: '', status: 'in_progress' };
+  parsed = {
+    reply: 'Thanks so much for messaging Outbound Travellers! 😊 Our team will get back to you very shortly.',
+    intent: 'travel_lead',
+    fields: {},
+    ask_quick_assistance: false,
+    notes: '',
+    status: 'in_progress',
+  };
 }
 
 // 4. Validate intent.
@@ -54,21 +55,19 @@ const strip = (v) => { const t = (v === undefined || v === null) ? '' : String(v
 function cleanPhone(v) {
   if (!v) return '';
   let d = String(v).replace(/\D/g, '');
-  // Indian 10-digit mobile (optionally written with 91 / 0 / +91) -> '+91 9xxxx xxxxx'
+  // Indian 10-digit mobile (optionally written with 91 / 0 / +91) -> '+91 xxxxx xxxxx'
   let in10 = d;
   if (in10.length === 12 && in10.startsWith('91')) in10 = in10.slice(2);
   else if (in10.length === 11 && in10.startsWith('0')) in10 = in10.slice(1);
   if (in10.length === 10 && /^[6-9]/.test(in10)) return '+91 ' + in10.slice(0, 5) + ' ' + in10.slice(5);
-  // International number (came with its own country code / + sign, e.g. +971 UAE) -> keep it, with the +
+  // International number (came with its own country code / + sign) -> keep it, with the +
   const hadPlus = String(v).trim().charAt(0) === '+';
-  if (d.startsWith('00')) d = d.slice(2); // 00-prefix international dialling -> drop the 00
+  if (d.startsWith('00')) d = d.slice(2);
   if (hadPlus || (d.length >= 11 && d.length <= 15)) return '+' + d;
-  // anything else looks like junk -> empty so the bot re-asks once
   return '';
 }
 
-// 5. Merge. For non-travel intents, don't let the LLM invent lead data — keep
-//    only the existing known values.
+// 5. Merge. For non-travel intents, don't let the LLM invent lead data.
 const takeLLM = (intent === 'travel_lead');
 const merged = {};
 for (const f of FIELDS) {
@@ -78,49 +77,52 @@ for (const f of FIELDS) {
 }
 merged.whatsapp_number = cleanPhone(merged.whatsapp_number);
 
-// 6. Notes (running summary = cross-message memory). Take the LLM's fresh summary
-//    when it gave one; otherwise keep the previous notes so memory is never lost.
+// If the AI returned a destination but no normalized_destination, fall back to destination.
+if (!merged.normalized_destination && merged.destination) {
+  merged.normalized_destination = merged.destination;
+}
+
+// 6. Notes (running summary). Take the LLM's fresh summary when it gave one.
 const newNotes = strip(parsed.notes);
 const prevNotes = strip(norm.existing_notes);
 const notes = newNotes !== '' ? newNotes : prevNotes;
 
-// 7. Status: qualified once the QUALIFY fields are in; in_progress if anything
-//    is captured; new otherwise.
+// 7. Status: qualified once the core 4 are filled; in_progress if anything captured.
 const qualified = QUALIFY.every((f) => merged[f] && merged[f] !== '');
 const anyFilled = FIELDS.some((f) => merged[f] && merged[f] !== '');
 const status = qualified ? 'qualified' : (anyFilled ? 'in_progress' : 'new');
 
-// 7b. Fire the CRM push ONLY on the message where the lead first becomes
-//     qualified (compare against the previously-known fields). This makes
-//     Workpex receive each lead exactly once, never on every later message.
-const wasQualified = QUALIFY.every((f) => strip(knownF[f]) !== '');
-const crmPush = qualified && !wasQualified;
+// 8. Should we ask the quick-assistance question? Only on the turn where we first
+//    become qualified, and only if quick_assistance isn't already answered.
+const askQuickAssist = qualified && !strip(knownF.quick_assistance) && !!parsed.ask_quick_assistance;
 
-// 8. Timestamps; preserve original first_contact_ts if the row existed.
+// 9. CRM push is handled by the Button handler when the user clicks Yes.
+//    We do NOT push on the phone-number turn because the quick-assistance
+//    answer may change the lead tag.
+const crmPush = false;
+
+// 10. Timestamps; preserve original first_contact_ts if the row existed.
 const nowIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
 const firstContact = (norm.existing_first_contact_ts && String(norm.existing_first_contact_ts).trim()) || nowIST;
 
-// 9. is_lead → gates the sheet write. True for travel_lead, or if a lead row
-//    already exists for this user (so we keep updating it).
-const hadRow = FIELDS.some((f) => strip(knownF[f]) !== '');
-const isLead = (intent === 'travel_lead') || hadRow;
-
 return [{
   json: {
-    ig_user_id:   norm.ig_user_id,
-    ig_username:  norm.ig_username,
-    reply:        (parsed.reply && String(parsed.reply).trim()) || 'Got it! \u{1F64F}',
+    ig_user_id:          norm.ig_user_id,
+    ig_username:         norm.ig_username,
+    reply:               (parsed.reply && String(parsed.reply).trim()) || 'Got it! 🙏',
     intent,
-    is_lead:      isLead,
-    name:            merged.name,
-    whatsapp_number: merged.whatsapp_number,
-    destination:     merged.destination,
-    pax:             merged.pax,
-    budget:          merged.budget,
+    is_lead:             true,
+    destination:         merged.destination,
+    normalized_destination: merged.normalized_destination,
+    travel_date:         merged.travel_date,
+    pax:                 merged.pax,
+    whatsapp_number:     merged.whatsapp_number,
+    quick_assistance:    '',
+    ask_quick_assistance: askQuickAssist,
     notes,
     status,
-    crm_push: crmPush,
-    first_contact_ts: firstContact,
-    last_update_ts:  nowIST,
+    crm_push:            crmPush,
+    first_contact_ts:    firstContact,
+    last_update_ts:      nowIST,
   },
 }];
