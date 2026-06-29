@@ -4,8 +4,6 @@ ManyChat is a **dumb pipe**: it does NO conversation logic. It just (a) forwards
 DM to n8n, and (b) stores the latest field values so they ride along on the next message.
 All the "brain" lives in n8n + OpenAI. Do **not** build a keyword/quick-reply flow.
 
-I'll give you the **n8n webhook URL** once the workflow is deployed. Steps:
-
 ---
 
 ## 1. Connect Instagram
@@ -22,6 +20,7 @@ ManyChat → **Settings → Fields → Custom User Fields → + New Field**. Cre
 - `whatsapp_number`
 - `quick_assistance`
 - `bot reply`  ← used by the PENDING gate in step 4
+- `lead_status` ← optional, for debugging
 - *(`ig_user_id` and `ig_username` come from ManyChat's built-in system fields — no
   need to create them; we reference the built-ins when building the request.)*
 
@@ -40,6 +39,7 @@ ManyChat → **Settings → Fields → Custom User Fields → + New Field**. Cre
   "message_text": "{{last_input_text}}",
   "ig_user_id": "{{user_id}}",
   "ig_username": "{{user_name}}",
+  "ig_fullname": "{{full_name}}",
   "destination": "{{cuf_destination}}",
   "normalized_destination": "{{cuf_normalized_destination}}",
   "travel_date": "{{cuf_travel_date}}",
@@ -52,6 +52,9 @@ ManyChat → **Settings → Fields → Custom User Fields → + New Field**. Cre
 > Use ManyChat's field-picker to insert the real merge tags — the `{{...}}` names above
 > are placeholders. `message_text` = the user's last text input; `ig_user_id`/`ig_username`
 > = ManyChat's system User ID / Username; the rest = the Custom User Fields from step 2.
+>
+> Legacy fields like `name` and `budget` are harmless if left in the body, but the Rahul
+> flow ignores them.
 
 ## 4. Map the n8n JSON response back
 The n8n webhook responds with:
@@ -70,11 +73,17 @@ The n8n webhook responds with:
 }
 ```
 In the External Request **Response mapping**:
-- Send **`reply`** back to the user as the Instagram message (Send Message → insert the
-  `reply` response variable).
-- Write each value in **`fields`** into the matching Custom User Field
-  (`fields.destination` → `destination`, etc.).
-  This is the entire memory mechanism — next message carries the updated state.
+- `$.reply` → `bot reply`
+- `$.fields.destination` → `destination`
+- `$.fields.normalized_destination` → `normalized_destination`
+- `$.fields.travel_date` → `travel_date`
+- `$.fields.pax` → `pax`
+- `$.fields.whatsapp_number` → `whatsapp_number`
+- `$.fields.quick_assistance` → `quick_assistance`
+- `$.status` → `lead_status` (optional)
+
+Then send **`reply`** back to the user as the Instagram message (Send Message → insert the
+`bot reply` response variable).
 
 ## 4b. ⚠️ REQUIRED — the `PENDING` reply gate (do NOT skip)
 n8n uses the sentinel reply **`PENDING`** for messages that must NOT be sent:

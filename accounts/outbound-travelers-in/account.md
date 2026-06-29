@@ -22,7 +22,7 @@ Rahul persona** with a fixed collection order:
 ## n8n
 - Instance: `https://n8n.srv1159219.hstgr.cloud`
 - Project: Outbound Travelers (`outboundtravelers1@gmail.com`)
-- Workflow: **"Outbound IG Lead Bot — 1 · Chat & Capture"** (`AfmPZXhWMetbxHTl`) — **INACTIVE until ManyChat wiring is updated**
+- Workflow: **"Outbound IG Lead Bot — 1 · Chat & Capture"** (`AfmPZXhWMetbxHTl`) — **ACTIVE**
 - Webhook path: `ig-lead-bot`
   → URL `https://n8n.srv1159219.hstgr.cloud/webhook/ig-lead-bot`
 - Error workflow: "Error Alerts" (`f8JebCcUmgk137Li`)
