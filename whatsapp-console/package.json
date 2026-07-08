@@ -1,0 +1,22 @@
+{
+  "name": "whatsapp-console",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Outbound Travelers WhatsApp Console — send/receive WhatsApp from a web dashboard via Meta Cloud API",
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "google-auth-library": "9.15.0",
+    "next": "^14.2.35",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "eslint": "8.57.0",
+    "eslint-config-next": "^14.2.35"
+  }
+}

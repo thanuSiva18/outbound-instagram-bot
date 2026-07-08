@@ -1,0 +1,24 @@
+# dependencies
+/node_modules
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# env (real secrets — never commit)
+.env
+.env.local
+.env*.local
+
+# local message store (runtime data)
+/data/store.json
+
+# uploaded/received media (runtime)
+/public/uploads/
+
+# misc
+.DS_Store
+*.log

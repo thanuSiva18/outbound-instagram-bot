@@ -92,24 +92,47 @@ const qualified = QUALIFY.every((f) => merged[f] && merged[f] !== '');
 const anyFilled = FIELDS.some((f) => merged[f] && merged[f] !== '');
 const status = qualified ? 'qualified' : (anyFilled ? 'in_progress' : 'new');
 
-// 8. Ask the quick-assistance question deterministically on the turn where we first
-//    become qualified and quick_assistance isn't already answered. The AI is unreliable
-//    here, so we override the reply text to the exact scripted button prompt.
-const askQuickAssist = qualified && !strip(knownF.quick_assistance);
+// 8. DETERMINISTIC SCRIPTED REPLY — the AI only extracts fields; every line the
+//    customer sees is fixed here, so the agent cannot improvise or go off-script.
+//    Pick the message for the next missing field, in strict order:
+//    destination → travel_date → pax → whatsapp_number → quick-assistance.
+const hasDest  = !!(merged.destination || merged.normalized_destination);
+const hasDate  = !!merged.travel_date;
+const hasPaxF  = !!merged.pax;
+const hasPhone = !!(merged.whatsapp_number && merged.whatsapp_number !== '');
+const priorChat = norm.prior_chat === true;
 
-// 9. CRM push is handled by the Button handler when the user clicks Yes.
-//    We do NOT push on the phone-number turn because the quick-assistance
-//    answer may change the lead tag.
+// Ask quick-assistance once all four are captured and it isn't already answered.
+const askQuickAssist = hasDest && hasDate && hasPaxF && hasPhone && !strip(knownF.quick_assistance);
+
+let replyText;
+if (askQuickAssist) {
+  replyText = 'Thanks for your cooperation. Do you need quick assistance?';
+} else if (!hasDest) {
+  // First contact gets the full intro; a continuing chat just re-asks for destination.
+  replyText = priorChat
+    ? 'May I know which destination you are looking for?'
+    : 'Hi, this is Rahul from Outbound Travellers. Thank you for contacting us. May I know which destination you are looking for?';
+} else if (!hasDate) {
+  replyText = 'Great choice! When are you planning to travel?';
+} else if (!hasPaxF) {
+  replyText = 'Great. May I know the number of people travelling?';
+} else if (!hasPhone) {
+  replyText = 'Thanks for the information. Could you please share your contact number so our travel consultant can help you with the trip details?';
+} else {
+  // All four captured and quick-assistance already answered.
+  replyText = 'Thank you! Our travel consultant will get back to you shortly.';
+}
+
+// 9. CRM push is handled by the Button handler on a Yes click (not on the phone turn).
 const crmPush = false;
 
-// 10. Timestamps; preserve original first_contact_ts if the row existed.
+// 10. Timestamps. Use the conversation epoch from Normalize as first_contact_ts so the
+//     saved value matches the memory session key (both rotate together on a >48h reset).
 const nowIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
-const firstContact = (norm.existing_first_contact_ts && String(norm.existing_first_contact_ts).trim()) || nowIST;
-
-// Scripted quick-assistance prompt must be exact.
-const replyText = askQuickAssist
-  ? 'Almost done — do you need quick assistance?'
-  : ((parsed.reply && String(parsed.reply).trim()) || 'Got it! 🙏');
+const firstContact = (norm.conv_first_contact && String(norm.conv_first_contact).trim())
+  || (norm.existing_first_contact_ts && String(norm.existing_first_contact_ts).trim())
+  || nowIST;
 
 return [{
   json: {
@@ -117,7 +140,7 @@ return [{
     ig_username:         norm.ig_username,
     reply:               replyText,
     intent,
-    is_lead:             true,
+    is_lead:             !!(merged.whatsapp_number && merged.whatsapp_number !== ''),
     destination:         merged.destination,
     normalized_destination: merged.normalized_destination,
     travel_date:         merged.travel_date,

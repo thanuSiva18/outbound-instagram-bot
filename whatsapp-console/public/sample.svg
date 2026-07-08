@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200" viewBox="0 0 300 200">
+  <rect width="300" height="200" fill="#cfe9d9"/>
+  <circle cx="220" cy="55" r="26" fill="#ffd86b"/>
+  <path d="M0 160 L80 95 L140 150 L200 110 L300 175 L300 200 L0 200 Z" fill="#7ec99b"/>
+  <path d="M0 175 L70 135 L130 170 L210 130 L300 185 L300 200 L0 200 Z" fill="#4fae78" opacity="0.85"/>
+  <text x="150" y="30" font-family="Segoe UI, sans-serif" font-size="15" fill="#0b6b46" text-anchor="middle">Customer sent a photo 📷</text>
+</svg>

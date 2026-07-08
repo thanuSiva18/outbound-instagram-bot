@@ -6,6 +6,12 @@
 |---|---|---|---|---|
 | `.in` Instagram (`AfmPZXhWMetbxHTl`) | `1T89p6LhpjwNJ_kqh5WT6DAj3Jt242Gs1JaTNzDCJJio` | `leads_v2` | "Testing new bot" | 13 (A–M) |
 | Main Instagram / Facebook (`mO9gd0VJISdzlB5x`) | `19qt6mTAmEDRVVZY_F26A1Xvee7JyjiGbmWcz0va5IuY` | `leads` | (main leads sheet) | 13 (A–M) |
+| WhatsApp Cloud API (`qx4PSZuDK6b6Q642`) | `1T89p6LhpjwNJ_kqh5WT6DAj3Jt242Gs1JaTNzDCJJio` | `whatsapp leads` (gid `751387433`) | "Testing new bot" | 13 (A–M) |
+
+> **WhatsApp tab note:** same 13-column Rahul schema. The match key is **`ig_user_id`**, which for WhatsApp stores
+> the raw sender phone (`messages[0].from`, e.g. `919597959728`) — NOT the formatted `whatsapp_number`. The
+> `whatsapp_number` column holds the display value `+91 xxxxx xxxxx` (auto-captured from the sender) and is not used
+> for matching. `Lookup`, `Claim lock`, `Read lock`, and `Save lead` all match on `ig_user_id`.
 
 Both sheets must be shared (Editor) with the Google account behind credential `Bnb4dKAXJwcqzUWj` (`outboundtravelers1@gmail.com`).
 

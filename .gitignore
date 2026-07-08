@@ -23,6 +23,7 @@ npm-debug.log*
 .agents/
 n8n-mcp-2/
 n8n-skills/
-accounts/outbound-travelers-whatsapp/
-activate_whatsapp_workflow.js
-deploy_whatsapp_workflow.js
+.wa-fix-tmp/
+
+# lead PII handoff files - never commit
+CRM-backfill-leads-*.md

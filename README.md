@@ -45,6 +45,10 @@ accounts/
   outbound-travelers-in/              # the .in page — LIVE AI bot AfmPZXhWMetbxHTl
     account.md
     chat-and-capture.workflow.json    # human-readable reference (canonical = live n8n)
+  outbound-travelers-whatsapp/        # WhatsApp Cloud API (no ManyChat) — LIVE AI bot qx4PSZuDK6b6Q642
+    account.md
+    chat-and-capture-whatsapp.workflow.json   # restore reference (Meta token redacted)
+    meta-whatsapp-setup.md            # Meta Cloud API webhook + credential setup
 docs/                                 # shared reference (sheet schema, manychat, crm, creds)
 ```
 
@@ -86,7 +90,10 @@ docs/                                 # shared reference (sheet schema, manychat
 - [x] Main workflow built, validated (`mO9gd0VJISdzlB5x`) — **inactive** until go-live
 - [x] Async reply + burst dedup (Claim lock / Read lock / Winner? / Send reply)
 - [x] Repo synced from live workflows (2026-06-29)
+- [x] **WhatsApp Cloud API bot** built, fixed & live (`qx4PSZuDK6b6Q642`) — direct Meta integration, no ManyChat,
+  3-field auto-phone Rahul flow, interactive Yes/No button (2026-06-30). See `accounts/outbound-travelers-whatsapp/`.
 - [ ] Main + Messenger ManyChat wiring + end-to-end test
+- [ ] WhatsApp: live-confirm Yes→CRM push from a real handset; move Meta token to an n8n credential
 
 ## Secrets
 Never commit secrets (see CLAUDE.md §11). They live in Claude Code's MCP config

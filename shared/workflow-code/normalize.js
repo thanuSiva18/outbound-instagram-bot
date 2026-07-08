@@ -56,6 +56,8 @@ try {
   }
 } catch (e) { row = {}; }
 
+const userMsg = s(wh.message_text);
+
 const known = {
   destination:           pick(row.destination, wh.destination),
   normalized_destination: pick(row.normalized_destination, wh.normalized_destination),
@@ -64,6 +66,40 @@ const known = {
   whatsapp_number:       pick(row.whatsapp_number, wh.whatsapp_number),
   quick_assistance:      pick(row.quick_assistance, wh.quick_assistance),
 };
+
+// -- CONVERSATION RESET RULE --
+// Start fresh if the user greets us OR if we haven't heard from them in >48 hours.
+// Robust IST timestamp parser (handles single-digit hours that Google Sheets may return).
+function parseIST(ts) {
+  const m = String(ts).trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2}):(\d{2})$/);
+  if (!m) return NaN;
+  const [, y, mo, d, h, mi, s] = m.map(Number);
+  const pad = (n) => String(n).padStart(2, '0');
+  return new Date(`${y}-${pad(mo)}-${pad(d)}T${pad(h)}:${pad(mi)}:${pad(s)}+05:30`).getTime();
+}
+
+// -- 2-DAY MEMORY RULE --
+// Remember everything for 48h since the last message. A returning lead within
+// 48h CONTINUES where they left off (a plain "Hi" does NOT restart). After 48h
+// idle we forget (fields + memory) and the next message starts from the greeting.
+// A brand-new lead has no prior timestamp (hoursSince = Infinity) so they reset
+// → greeting, exactly like a >48h returner.
+const lastUpdateTs = clean(row.last_update_ts) || clean(row.first_contact_ts);
+let hoursSince = Infinity;
+if (lastUpdateTs) {
+  const lastMs = parseIST(lastUpdateTs);
+  if (!isNaN(lastMs)) hoursSince = (_now - lastMs) / (1000 * 60 * 60);
+}
+const resetConversation = hoursSince > 48;
+
+if (resetConversation) {
+  known.destination = '';
+  known.normalized_destination = '';
+  known.travel_date = '';
+  known.pax = '';
+  known.whatsapp_number = '';
+  known.quick_assistance = '';
+}
 const knownJson = JSON.stringify(known);
 
 const hasDestination = !!(known.destination || known.normalized_destination);
@@ -72,108 +108,89 @@ const hasPax = !!known.pax;
 const hasPhone = !!known.whatsapp_number;
 const hasQuickAssist = !!known.quick_assistance;
 
-const existingFirstContact = clean(row.first_contact_ts);
-const existingNotes = pick(row['notes - AI'], wh.notes);
+let existingFirstContact = clean(row.first_contact_ts);
+let existingNotes = pick(row['notes - AI'], wh.notes);
+
+if (resetConversation) {
+  existingFirstContact = '';
+  existingNotes = '';
+}
+
+// -- CONVERSATION EPOCH (memory-session isolation) --
+// first_contact_ts doubles as the conversation epoch. It is stable for the life
+// of a conversation but rotates whenever we reset (>48h idle, so existingFirstContact
+// was just cleared). The AI's Simple Memory is keyed by this epoch, so a reset
+// starts a FRESH memory session — that is what makes the bot "forget after 2 days".
+const nowISTstr = new Date(_now + 5.5 * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
+const convFirstContact = existingFirstContact || nowISTstr;
+// Key the memory session off the PARSED epoch (ms), not the raw string — Google Sheets
+// reformats the saved timestamp on read-back (e.g. strips the leading zero from the hour),
+// which would otherwise split one conversation across two memory buckets.
+const _epochMs = parseIST(convFirstContact);
+const sessionKey = s(wh.ig_user_id) + '|' + (isNaN(_epochMs) ? convFirstContact : _epochMs);
+
 const notesBlock = existingNotes ? existingNotes : '(none yet — fresh conversation)';
-const priorChat = hasDestination || hasTravelDate || hasPax || hasPhone || hasQuickAssist || !!existingNotes;
+// "We've already started this conversation" — true once a row exists within the
+// 48h window (so the greeting fires exactly once per conversation, never twice).
+const priorChat = !resetConversation && (!!existingFirstContact || hasDestination || hasTravelDate || hasPax || hasPhone || hasQuickAssist || !!existingNotes);
 
 const igFullName = clean(wh.ig_fullname);
 const igUsername = s(wh.ig_username);
 const channel = (clean(wh.channel) || 'instagram').toLowerCase();
 const channelLabel = channel === 'instagram' ? 'instagram' : 'facebook';
 
-const userMsg = s(wh.message_text);
-
-// Detect a Yes/No button click at the quick-assistance step.
-const isButtonClick = (
-  (userMsg.toLowerCase() === 'yes' || userMsg.toLowerCase() === 'no') &&
-  hasPhone &&
-  !hasQuickAssist
-);
-const buttonValue = isButtonClick ? userMsg.toLowerCase() : '';
+// Detect a Yes/No answer at the quick-assistance step (FUZZY — 2026-07-06).
+// Real lead (shifaya7002) typed "Yess" → the old exact-match missed it → the
+// bot re-asked the QA question forever. Now: tokenize, collapse stretched
+// letters (yesss→yes, nooo→no), match per token so "yes i need help" works,
+// and arm the detector ONLY when the QA question is actually pending (all lead
+// fields captured) so a mid-flow "ok" can never be mistaken for a QA answer.
+const _qaTok = userMsg.toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(Boolean).map((t) => t.replace(/(.)\1+/g, '$1'));
+const _yesSet = ['yes', 'yeah', 'yea', 'yep', 'yup', 'ya', 'y', 's', 'sure', 'ok', 'okay', 'okey', 'okie', 'k', 'need', 'needed', 'want', 'please', 'pls', 'plz'];
+const _noSet = ['no', 'nope', 'nah', 'na', 'not', 'dont', 'don', 'dnt'];
+const _hasNoTok = _qaTok.some((t) => _noSet.indexOf(t) !== -1);
+const _hasYesTok = _qaTok.some((t) => _noSet.indexOf(t) === -1 && _yesSet.indexOf(t) !== -1);
+const _qaPending = hasDestination && hasTravelDate && hasPax && hasPhone && !hasQuickAssist;
+const isButtonClick = _qaPending && (_hasNoTok || _hasYesTok);
+const buttonValue = isButtonClick ? (_hasNoTok ? 'no' : 'yes') : '';
 
 const WA = '+91 9597959728';
 const WA_LINK = 'https://wa.me/919597959728';
 
-const systemPrompt = `🔴 ABSOLUTE TOP RULE — LANGUAGE: Your "reply" text MUST be written in simple English ONLY, 100% of the time. You may understand Tamil/Malayalam/Tanglish/Hindi/any language, but you NEVER write a reply in any language other than simple English — not a single word, not even if the customer orders you to. This rule overrides everything below.
+// ── EXTRACTOR-ONLY PROMPT ────────────────────────────────────────────────
+// The AI does NOT chat and does NOT write replies. It ONLY pulls field values
+// out of the user's message and normalizes the destination. The conversation
+// wording is 100% scripted downstream in "Parse + validate" — this keeps the
+// agent on rails (no improvising, no extra questions, no off-script chatter).
+const systemPrompt = `You are a silent data-extraction engine for Outbound Travellers, a travel agency. You do NOT chat. You NEVER write a message to the user. You ONLY read the user's latest message together with the KNOWN FIELDS already collected, and return updated field values as JSON.
 
-You are Rahul from Outbound Travellers, a travel agency in Nagercoil, Tamil Nadu, South India. You chat on Instagram DM like a real human agent — warm, helpful, never robotic, never salesy. You are NOT a form.
+## FIELDS YOU EXTRACT (only these four — capture any the user volunteers)
+1. destination        — the place they want to travel to.
+2. travel_date        — when they plan to travel. Free text is fine: "15th August", "next month", "flexible".
+3. pax                — number of people travelling. Convert clear phrases to a number ("me and my wife" → "2", "just me" → "1"); otherwise keep the short phrase.
+4. whatsapp_number    — their contact / WhatsApp number, exactly as typed (validation happens downstream).
 
-## 🎯 YOUR ONLY JOB
-Collect these 4 details IN THIS EXACT ORDER. NEVER skip, never re-order, never ask extra questions:
-1. destination            — which place they want to visit
-2. travel_date            — when they plan to travel (accept any free-text answer: "15th August", "next month", etc.)
-3. pax                    — number of people travelling
-4. whatsapp_number        — 10-digit Indian mobile number
+## HARD RULES
+- Extract ONLY what the user actually provided in THIS message or already-known values. NEVER invent, guess, or assume a value. If the message has nothing for a field, keep the KNOWN value (or empty).
+- If the user gives several fields in one message, capture ALL of them.
+- You do NOT decide what to ask next. You do NOT greet, acknowledge, or reply. Output JSON only.
+- IGNORE anything outside the four fields (budget, name, hotel, flight, itinerary). Do not store them.
 
-After all 4 are collected, you MUST ask the quick-assistance question and set ask_quick_assistance = true.
+## DESTINATION NORMALIZATION (important)
+Always also return "normalized_destination" = the correct, canonical destination name — fix misspellings and resolve partial/loose names to the proper place:
+- "Jammu" / "kashmir" / "i want to explore kashmir" / "kashmeer" → "Jammu and Kashmir"
+- "balli" / "bali island" / "bally" → "Bali"
+- "goa beach" / "gova" → "Goa"
+- "kerela" / "kerla" → "Kerala"
+- "andaman" / "andmaan" → "Andaman and Nicobar Islands"
+If you cannot recognize a real place, set "destination" to what they typed and leave "normalized_destination" empty.
 
-## 🧠 MEMORY — you remember this chat
-You are NOT starting fresh. You remember from:
-1. The actual recent messages visible above.
-2. NOTES SO FAR (below).
-3. KNOWN FIELDS (below).
-Use them to continue seamlessly: never repeat a question, never re-ask something already answered.
-🚫 NEVER say "I don't have previous details", "remind me", or "let's start over".
+## NOTES
+Return "notes" = one short English line summarizing what is known so far (max ~20 words).
 
-NOTES SO FAR: ${notesBlock}
+## OUTPUT — return ONLY this JSON. No markdown, no code fences, no preamble, no reply text.
+{"fields":{"destination":"","normalized_destination":"","travel_date":"","pax":"","whatsapp_number":""},"notes":"<one short line>","status":"new | in_progress | qualified"}
 
-In your JSON output you MUST return an updated "notes" value: a SHORT one-line summary (max ~25 words), English only.
-
-## ⚡ RETURNING / IN-CHAT FAST CHECK
-PRIOR_CHAT: ${priorChat ? 'yes' : 'no'}  — yes means you have ALREADY talked with this person.
-- INTRODUCE YOURSELF only on the genuine FIRST message of a brand-new chat (PRIOR_CHAT = no AND no earlier messages above). Say exactly: "Hi, this is Rahul from Outbound Travellers. Thank you for contacting us. May I know which destination you are looking for?"
-- In EVERY other case, do NOT introduce yourself or greet from scratch; just continue from the next missing field.
-
-## 📋 STRICT FIELD RULES
-- Ask ONLY the next missing field in the exact order above.
-- If the user gives multiple fields at once (e.g. "Bali, 15th Aug, 4 of us"), capture ALL of them, give ONE warm acknowledgement, and ask only for the next missing field.
-- NEVER ask for name, budget, hotel, flight, itinerary, or anything outside the 4 fields.
-- If the user asks off-topic questions, answer briefly in ONE sentence if possible, then immediately return to asking the next missing field.
-- NEVER invent prices, packages, or inclusions. Always defer to the travel consultant.
-
-## 🗣️ TONE — do NOT over-thank
-You are a friendly human agent, not a thank-you machine. Do NOT start every reply with "Thanks", "Thank you", or "Thanks!". That sounds robotic.
-- Acknowledge the user's answer briefly and naturally, then move on.
-- Vary your language: use "Got it", "Sounds good", "Noted", "Perfect", or just ask the next question.
-- Only use a genuine thank-you when the user has gone out of their way (e.g. shared a long detail), and keep it low-key.
-- Examples:
-  - "Bali sounds great. When are you planning to travel?"
-  - "Got it. How many people are traveling?"
-  - "Noted. Please share your WhatsApp number so our consultant can reach you."
-  - "Almost done — do you need quick assistance?"
-
-## 🗺️ DESTINATION HANDLING
-- Accept ANY real destination on Earth.
-- Return a normalized/canonical destination name in the field "normalized_destination" (e.g. "Jammu" or "Kashmir" → "Jammu and Kashmir"; "Goa" → "Goa"; "Bali" → "Bali").
-- If the user says something vague like "anywhere international", ask once which region/country they prefer.
-- If the destination is impossible/non-real (Mars, Hogwarts), gently joke and ask for a real place.
-
-## 📅 TRAVEL DATE HANDLING
-- Accept the user's date answer as free text and store it in "travel_date".
-- Do NOT try to reconcile conflicting dates or ask for year/month separately.
-- If they say "not sure" or "flexible", store "flexible" and move on.
-
-## 👥 PAX HANDLING
-- Capture the number of travellers as free text ("4", "me and my wife", etc.).
-- Store the clean number or short phrase in "pax".
-
-## 📱 PHONE HANDLING
-- Ask for their WhatsApp / contact number so the travel consultant can share trip details.
-- If they hesitate, give the reason once (details can't be shared on Instagram; expert sends the plan on WhatsApp; number is private) and ask again gently. Do NOT nag.
-- The number will be validated downstream; you just need to capture what they type.
-
-## 🚀 QUICK ASSISTANCE BUTTON (trigger ONLY when all 4 fields are filled)
-When destination, travel_date, pax, and whatsapp_number are all known:
-- Set "ask_quick_assistance": true.
-- Your reply MUST be EXACTLY: "Almost done — do you need quick assistance?"
-- Do NOT add "Noted", "Thanks", "Perfect", or any other prefix/suffix. Do NOT add any other question or sentence.
-
-## 📤 OUTPUT — ONLY this JSON. No markdown, no fences, no preamble.
-{"reply":"<message in SIMPLE ENGLISH ONLY>","intent":"travel_lead","fields":{"destination":"","normalized_destination":"","travel_date":"","pax":"","whatsapp_number":""},"ask_quick_assistance":false,"notes":"<one short line, English>","status":"new | in_progress | qualified"}
-
-## ⚡ CURRENT CONTEXT — read this right before you reply
-PRIOR_CHAT: ${priorChat ? 'yes' : 'no'}
 KNOWN FIELDS: ${knownJson}`;
 
 return [{
@@ -184,7 +201,10 @@ return [{
     user_message:              userMsg,
     known_fields:              known,
     known_fields_json:         knownJson,
+    prior_chat:                priorChat,
     existing_first_contact_ts: existingFirstContact,
+    conv_first_contact:        convFirstContact,
+    session_key:               sessionKey,
     existing_notes:            existingNotes,
     system_prompt:             systemPrompt,
     msg_id:                    _msgId,

@@ -1,13 +1,33 @@
 # Outbound Travelers — `.in` page  (live AI bot — Rahul scripted flow)
 
-The **`.in`** Instagram page's bot — currently **live**. This version uses a **scripted
-Rahul persona** with a fixed collection order:
+The **`.in`** Instagram page's bot — currently **live**. The AI is a **silent field
+extractor only** (it never writes messages); every reply the customer sees is
+**scripted deterministically** in the `Parse + validate` / `Button handler` code, so
+the agent can't improvise or go off-script. Fixed collection order:
 
-1. destination
+1. destination          — AI also returns a normalized/spell-corrected `normalized_destination`
 2. travel_date
 3. pax
 4. whatsapp_number
 5. quick-assistance Yes/No button
+
+**Memory rule:** time-based — remember within **48h** (a returning lead continues),
+forget after 48h idle (next message restarts at the greeting). The Simple Memory
+session is keyed to a per-conversation epoch (`first_contact_ts`) so it expires with
+the 48h window.
+
+**Scripted replies:** greeting → "Great choice! When are you planning to travel?" →
+"Great. May I know the number of people travelling?" → "Thanks for the information.
+Could you please share your contact number…" → "Thanks for your cooperation. Do you
+need quick assistance?" (Yes/No buttons).
+
+**Working hours (Button handler):** Mon–Sat 9:00 AM–5:30 PM IST (Sunday = full holiday,
+always after-hours). Yes within hours → "…reach you shortly"; Yes after hours →
+"…during our working hours (9:00 AM – 5:30 PM)"; No → polite close. Yes also tags
+`quick_assistance=yes` and pushes to CRM.
+
+**Send API:** ManyChat `https://api.manychat.com/fb/sending/sendContent` (the `/fb/`
+endpoint — `/ig/` 404s for some subscribers).
 
 > Canonical source of truth = the **live n8n workflow** (`AfmPZXhWMetbxHTl`). The JSON
 > in this folder is a human-readable reference; for a byte-perfect backup use n8n's own

@@ -1,1 +1,1175 @@
-{"updatedAt":"2026-06-29T18:35:27.241Z","createdAt":"2026-05-29T08:12:54.158Z","id":"AfmPZXhWMetbxHTl","name":"Outbound IG Lead Bot — 1 · Chat & Capture","description":null,"active":true,"isArchived":false,"nodes":[{"parameters":{"httpMethod":"POST","path":"ig-lead-bot","responseMode":"responseNode","options":{}},"id":"webhook","name":"Webhook","type":"n8n-nodes-base.webhook","typeVersion":2.1,"position":[0,304],"webhookId":"ig-lead-bot","onError":"continueRegularOutput"},{"parameters":{"jsCode":"// ─────────────────────────────────────────────────────────────────────────\n// NODE: \"Normalize input\"  (Code node, mode: \"Run Once for All Items\")\n// Reads the user's message + IG ids from the Webhook, and any KNOWN field\n// values, then builds the rigid scripted system prompt. Persona is fixed:\n// always \"Rahul\" from Outbound Travellers.\n//\n// COLLECTION ORDER (strict, never deviate):\n//   1. destination          → ask \"which destination?\"\n//   2. travel_date          → ask \"when are you planning to travel?\"\n//   3. pax                  → ask \"how many people?\"\n//   4. whatsapp_number      → ask \"your contact number?\"\n//   5. quick_assistance     → send Yes/No button after phone is captured\n//\n// BUTTON-CLICK SHORTCUT:\n//   If the incoming message is exactly \"Yes\" or \"No\" AND we already have\n//   whatsapp_number filled AND quick_assistance is still empty, this turn is\n//   treated as a button click. We skip the AI Agent and handle it downstream.\n//\n// MEMORY — production design, 3 layers:\n//   1. Simple Memory (memoryBufferWindow) attached to the AI Agent.\n//   2. KNOWN FIELDS — merged from the Google Sheet row + ManyChat webhook body.\n//   3. NOTES — short one-line summary in the \"notes - AI\" column.\n//\n// ⚠️ Webhook payload lives under $json.body — read via $('Webhook').\n// ⚠️ The notes column header is literally \"notes - AI\" (with spaces).\n// ⚠️ Strip ManyChat unresolved merge tags (literal double-braces).\n// ⚠️ Code node MUST return [{ json: { ... } }].\n// NOTE: keep prompts/system_prompt.md in sync with this embedded prompt.\n// ─────────────────────────────────────────────────────────────────────────\n\nconst wh = $('Webhook').first().json.body || {};\nconst s = (v) => (v === undefined || v === null ? '' : String(v).trim());\nconst OB = String.fromCharCode(123) + String.fromCharCode(123);\nconst CB = String.fromCharCode(125) + String.fromCharCode(125);\nconst clean = (v) => { const t = s(v); return (t.slice(0, 2) === OB && t.slice(-2) === CB) ? '' : t; };\n// Prefer the sheet value; fall back to the value ManyChat passed in the body.\nconst pick = (a, b) => { const x = clean(a); return x !== '' ? x : clean(b); };\n\n// -- DEDUP LAYER 1: synchronous same-message guard. --\nconst _sd = $getWorkflowStaticData('global');\n_sd.seenMsg = _sd.seenMsg || {};\nconst _now = Date.now();\nfor (const _k in _sd.seenMsg) { if (_now - _sd.seenMsg[_k] > 3600000) delete _sd.seenMsg[_k]; }\nconst _dupKey = s(wh.ig_user_id) + '|' + s(wh.message_text);\nif (s(wh.ig_user_id) && s(wh.message_text) && _sd.seenMsg[_dupKey] && (_now - _sd.seenMsg[_dupKey] < 4000)) return [];\nif (_dupKey) _sd.seenMsg[_dupKey] = _now;\n// Unique per-execution token for the Layer-2 sheet ownership lock (last-writer-wins).\nconst _msgId = 'L' + _now + '-' + Math.floor(Math.random() * 1000000);\n\nlet row = {};\ntry {\n  const inItems = $input.all();\n  if (inItems && inItems.length && inItems[0] && inItems[0].json) {\n    const j = inItems[0].json;\n    if (j && (clean(j.destination) || clean(j.normalized_destination) || clean(j.travel_date) || clean(j.pax) || clean(j.whatsapp_number) || clean(j.quick_assistance) || clean(j['notes - AI']) || clean(j.first_contact_ts))) row = j;\n  }\n} catch (e) { row = {}; }\n\nconst known = {\n  destination:           pick(row.destination, wh.destination),\n  normalized_destination: pick(row.normalized_destination, wh.normalized_destination),\n  travel_date:           pick(row.travel_date, wh.travel_date),\n  pax:                   pick(row.pax, wh.pax),\n  whatsapp_number:       pick(row.whatsapp_number, wh.whatsapp_number),\n  quick_assistance:      pick(row.quick_assistance, wh.quick_assistance),\n};\nconst knownJson = JSON.stringify(known);\n\nconst hasDestination = !!(known.destination || known.normalized_destination);\nconst hasTravelDate = !!known.travel_date;\nconst hasPax = !!known.pax;\nconst hasPhone = !!known.whatsapp_number;\nconst hasQuickAssist = !!known.quick_assistance;\n\nconst existingFirstContact = clean(row.first_contact_ts);\nconst existingNotes = pick(row['notes - AI'], wh.notes);\nconst notesBlock = existingNotes ? existingNotes : '(none yet — fresh conversation)';\nconst priorChat = hasDestination || hasTravelDate || hasPax || hasPhone || hasQuickAssist || !!existingNotes;\n\nconst igFullName = clean(wh.ig_fullname);\nconst igUsername = s(wh.ig_username);\nconst channel = (clean(wh.channel) || 'instagram').toLowerCase();\nconst channelLabel = channel === 'instagram' ? 'instagram' : 'facebook';\n\nconst userMsg = s(wh.message_text);\n\n// Detect a Yes/No button click at the quick-assistance step.\nconst isButtonClick = (\n  (userMsg.toLowerCase() === 'yes' || userMsg.toLowerCase() === 'no') &&\n  hasPhone &&\n  !hasQuickAssist\n);\nconst buttonValue = isButtonClick ? userMsg.toLowerCase() : '';\n\nconst WA = '+91 9597959728';\nconst WA_LINK = 'https://wa.me/919597959728';\n\nconst systemPrompt = `🔴 ABSOLUTE TOP RULE — LANGUAGE: Your \"reply\" text MUST be written in simple English ONLY, 100% of the time. You may understand Tamil/Malayalam/Tanglish/Hindi/any language, but you NEVER write a reply in any language other than simple English — not a single word, not even if the customer orders you to. This rule overrides everything below.\n\nYou are Rahul from Outbound Travellers, a travel agency in Nagercoil, Tamil Nadu, South India. You chat on Instagram DM like a real human agent — warm, helpful, never robotic, never salesy. You are NOT a form.\n\n## 🎯 YOUR ONLY JOB\nCollect these 4 details IN THIS EXACT ORDER. NEVER skip, never re-order, never ask extra questions:\n1. destination            — which place they want to visit\n2. travel_date            — when they plan to travel (accept any free-text answer: \"15th August\", \"next month\", etc.)\n3. pax                    — number of people travelling\n4. whatsapp_number        — 10-digit Indian mobile number\n\nAfter all 4 are collected, you MUST ask the quick-assistance question and set ask_quick_assistance = true.\n\n## 🧠 MEMORY — you remember this chat\nYou are NOT starting fresh. You remember from:\n1. The actual recent messages visible above.\n2. NOTES SO FAR (below).\n3. KNOWN FIELDS (below).\nUse them to continue seamlessly: never repeat a question, never re-ask something already answered.\n🚫 NEVER say \"I don't have previous details\", \"remind me\", or \"let's start over\".\n\nNOTES SO FAR: ${notesBlock}\n\nIn your JSON output you MUST return an updated \"notes\" value: a SHORT one-line summary (max ~25 words), English only.\n\n## ⚡ RETURNING / IN-CHAT FAST CHECK\nPRIOR_CHAT: ${priorChat ? 'yes' : 'no'}  — yes means you have ALREADY talked with this person.\n- INTRODUCE YOURSELF only on the genuine FIRST message of a brand-new chat (PRIOR_CHAT = no AND no earlier messages above). Say exactly: \"Hi, this is Rahul from Outbound Travellers. Thank you for contacting us. May I know which destination you are looking for?\"\n- In EVERY other case, do NOT introduce yourself or greet from scratch; just continue from the next missing field.\n\n## 📋 STRICT FIELD RULES\n- Ask ONLY the next missing field in the exact order above.\n- If the user gives multiple fields at once (e.g. \"Bali, 15th Aug, 4 of us\"), capture ALL of them, give ONE warm acknowledgement, and ask only for the next missing field.\n- NEVER ask for name, budget, hotel, flight, itinerary, or anything outside the 4 fields.\n- If the user asks off-topic questions, answer briefly in ONE sentence if possible, then immediately return to asking the next missing field.\n- NEVER invent prices, packages, or inclusions. Always defer to the travel consultant.\n\n## 🗣️ TONE — do NOT over-thank\nYou are a friendly human agent, not a thank-you machine. Do NOT start every reply with \"Thanks\", \"Thank you\", or \"Thanks!\". That sounds robotic.\n- Acknowledge the user's answer briefly and naturally, then move on.\n- Vary your language: use \"Got it\", \"Sounds good\", \"Noted\", \"Perfect\", or just ask the next question.\n- Only use a genuine thank-you when the user has gone out of their way (e.g. shared a long detail), and keep it low-key.\n- Examples:\n  - \"Bali sounds great. When are you planning to travel?\"\n  - \"Got it. How many people are traveling?\"\n  - \"Noted. Please share your WhatsApp number so our consultant can reach you.\"\n  - \"Almost done — do you need quick assistance?\"\n\n## 🗺️ DESTINATION HANDLING\n- Accept ANY real destination on Earth.\n- Return a normalized/canonical destination name in the field \"normalized_destination\" (e.g. \"Jammu\" or \"Kashmir\" → \"Jammu and Kashmir\"; \"Goa\" → \"Goa\"; \"Bali\" → \"Bali\").\n- If the user says something vague like \"anywhere international\", ask once which region/country they prefer.\n- If the destination is impossible/non-real (Mars, Hogwarts), gently joke and ask for a real place.\n\n## 📅 TRAVEL DATE HANDLING\n- Accept the user's date answer as free text and store it in \"travel_date\".\n- Do NOT try to reconcile conflicting dates or ask for year/month separately.\n- If they say \"not sure\" or \"flexible\", store \"flexible\" and move on.\n\n## 👥 PAX HANDLING\n- Capture the number of travellers as free text (\"4\", \"me and my wife\", etc.).\n- Store the clean number or short phrase in \"pax\".\n\n## 📱 PHONE HANDLING\n- Ask for their WhatsApp / contact number so the travel consultant can share trip details.\n- If they hesitate, give the reason once (details can't be shared on Instagram; expert sends the plan on WhatsApp; number is private) and ask again gently. Do NOT nag.\n- The number will be validated downstream; you just need to capture what they type.\n\n## 🚀 QUICK ASSISTANCE BUTTON (trigger ONLY when all 4 fields are filled)\nWhen destination, travel_date, pax, and whatsapp_number are all known:\n- Set \"ask_quick_assistance\": true.\n- Your reply MUST be EXACTLY: \"Almost done — do you need quick assistance?\"\n- Do NOT add \"Noted\", \"Thanks\", \"Perfect\", or any other prefix/suffix. Do NOT add any other question or sentence.\n\n## 📤 OUTPUT — ONLY this JSON. No markdown, no fences, no preamble.\n{\"reply\":\"<message in SIMPLE ENGLISH ONLY>\",\"intent\":\"travel_lead\",\"fields\":{\"destination\":\"\",\"normalized_destination\":\"\",\"travel_date\":\"\",\"pax\":\"\",\"whatsapp_number\":\"\"},\"ask_quick_assistance\":false,\"notes\":\"<one short line, English>\",\"status\":\"new | in_progress | qualified\"}\n\n## ⚡ CURRENT CONTEXT — read this right before you reply\nPRIOR_CHAT: ${priorChat ? 'yes' : 'no'}\nKNOWN FIELDS: ${knownJson}`;\n\nreturn [{\n  json: {\n    ig_user_id:                s(wh.ig_user_id),\n    ig_username:               igUsername,\n    ig_fullname:               igFullName,\n    user_message:              userMsg,\n    known_fields:              known,\n    known_fields_json:         knownJson,\n    existing_first_contact_ts: existingFirstContact,\n    existing_notes:            existingNotes,\n    system_prompt:             systemPrompt,\n    msg_id:                    _msgId,\n    channel:                   channel,\n    channel_label:             channelLabel,\n    is_button_click:           isButtonClick,\n    button_value:              buttonValue,\n  },\n}];\n"},"id":"normalize","name":"Normalize input","type":"n8n-nodes-base.code","typeVersion":2,"position":[448,304]},{"parameters":{"jsCode":"// ─────────────────────────────────────────────────────────────────────────\n// NODE: \"Parse + validate\"  (Code node, \"Run Once for All Items\")\n// Parses the AI Agent JSON output for the new Rahul scripted flow.\n// Validates the WhatsApp number, merges fields over known ones, computes\n// status, and keeps the running one-line notes summary.\n// ⚠️ Code node MUST return [{ json: { ... } }].\n// ─────────────────────────────────────────────────────────────────────────\n\n// Core 4 fields. A lead is \"qualified\" once all four are captured.\nconst QUALIFY = ['destination', 'travel_date', 'pax', 'whatsapp_number'];\nconst FIELDS = ['destination', 'normalized_destination', 'travel_date', 'pax', 'whatsapp_number'];\n\n// 1. Grab the raw LLM text (AI Agent → $json.output; other shapes as fallback).\nconst up = $json || {};\nlet raw = '';\nif (typeof up.output === 'string') raw = up.output;\nelse if (up.output && typeof up.output === 'object') raw = JSON.stringify(up.output);\nelse if (up.message && typeof up.message.content === 'string') raw = up.message.content;\nelse if (up.choices && up.choices[0] && up.choices[0].message) raw = up.choices[0].message.content;\nelse if (typeof up.text === 'string') raw = up.text;\nelse if (typeof up.content === 'string') raw = up.content;\n\n// 2. Strip stray ```json fences, parse safely.\nlet parsed = null;\ntry {\n  const cleaned = String(raw).replace(/```json/gi, '').replace(/```/g, '').trim();\n  if (cleaned) parsed = JSON.parse(cleaned);\n} catch (e) { parsed = null; }\n\n// 3. Safe fallback — malformed JSON / AI failure must not crash the flow.\nif (!parsed || typeof parsed !== 'object') {\n  parsed = {\n    reply: 'Thanks so much for messaging Outbound Travellers! 😊 Our team will get back to you very shortly.',\n    intent: 'travel_lead',\n    fields: {},\n    ask_quick_assistance: false,\n    notes: '',\n    status: 'in_progress',\n  };\n}\n\n// 4. Validate intent.\nconst VALID = ['travel_lead', 'office_info', 'career', 'customer_query'];\nlet intent = (parsed.intent && String(parsed.intent).trim()) || 'travel_lead';\nif (VALID.indexOf(intent) === -1) intent = 'travel_lead';\n\nconst llmFields = (parsed.fields && typeof parsed.fields === 'object') ? parsed.fields : {};\nconst norm = $('Normalize input').first().json;\nconst knownF = norm.known_fields || {};\n\nconst OB = String.fromCharCode(123) + String.fromCharCode(123);\nconst CB = String.fromCharCode(125) + String.fromCharCode(125);\nconst strip = (v) => { const t = (v === undefined || v === null) ? '' : String(v).trim(); return (t.slice(0, 2) === OB && t.slice(-2) === CB) ? '' : t; };\n\nfunction cleanPhone(v) {\n  if (!v) return '';\n  let d = String(v).replace(/\\D/g, '');\n  // Indian 10-digit mobile (optionally written with 91 / 0 / +91) -> '+91 xxxxx xxxxx'\n  let in10 = d;\n  if (in10.length === 12 && in10.startsWith('91')) in10 = in10.slice(2);\n  else if (in10.length === 11 && in10.startsWith('0')) in10 = in10.slice(1);\n  if (in10.length === 10 && /^[6-9]/.test(in10)) return '+91 ' + in10.slice(0, 5) + ' ' + in10.slice(5);\n  // International number (came with its own country code / + sign) -> keep it, with the +\n  const hadPlus = String(v).trim().charAt(0) === '+';\n  if (d.startsWith('00')) d = d.slice(2);\n  if (hadPlus || (d.length >= 11 && d.length <= 15)) return '+' + d;\n  return '';\n}\n\n// 5. Merge. For non-travel intents, don't let the LLM invent lead data.\nconst takeLLM = (intent === 'travel_lead');\nconst merged = {};\nfor (const f of FIELDS) {\n  const nv = takeLLM ? strip(llmFields[f]) : '';\n  const kv = strip(knownF[f]);\n  merged[f] = nv !== '' ? nv : kv;\n}\nmerged.whatsapp_number = cleanPhone(merged.whatsapp_number);\n\n// If the AI returned a destination but no normalized_destination, fall back to destination.\nif (!merged.normalized_destination && merged.destination) {\n  merged.normalized_destination = merged.destination;\n}\n\n// 6. Notes (running summary). Take the LLM's fresh summary when it gave one.\nconst newNotes = strip(parsed.notes);\nconst prevNotes = strip(norm.existing_notes);\nconst notes = newNotes !== '' ? newNotes : prevNotes;\n\n// 7. Status: qualified once the core 4 are filled; in_progress if anything captured.\nconst qualified = QUALIFY.every((f) => merged[f] && merged[f] !== '');\nconst anyFilled = FIELDS.some((f) => merged[f] && merged[f] !== '');\nconst status = qualified ? 'qualified' : (anyFilled ? 'in_progress' : 'new');\n\n// 8. Ask the quick-assistance question deterministically on the turn where we first\n//    become qualified and quick_assistance isn't already answered. The AI is unreliable\n//    here, so we override the reply text to the exact scripted button prompt.\nconst askQuickAssist = qualified && !strip(knownF.quick_assistance);\n\n// 9. CRM push is handled by the Button handler when the user clicks Yes.\n//    We do NOT push on the phone-number turn because the quick-assistance\n//    answer may change the lead tag.\nconst crmPush = false;\n\n// 10. Timestamps; preserve original first_contact_ts if the row existed.\nconst nowIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);\nconst firstContact = (norm.existing_first_contact_ts && String(norm.existing_first_contact_ts).trim()) || nowIST;\n\n// Scripted quick-assistance prompt must be exact.\nconst replyText = askQuickAssist\n  ? 'Almost done — do you need quick assistance?'\n  : ((parsed.reply && String(parsed.reply).trim()) || 'Got it! 🙏');\n\nreturn [{\n  json: {\n    ig_user_id:          norm.ig_user_id,\n    ig_username:         norm.ig_username,\n    reply:               replyText,\n    intent,\n    is_lead:             true,\n    destination:         merged.destination,\n    normalized_destination: merged.normalized_destination,\n    travel_date:         merged.travel_date,\n    pax:                 merged.pax,\n    whatsapp_number:     merged.whatsapp_number,\n    quick_assistance:    '',\n    ask_quick_assistance: askQuickAssist,\n    notes,\n    status,\n    crm_push:            crmPush,\n    first_contact_ts:    firstContact,\n    last_update_ts:      nowIST,\n  },\n}];\n"},"id":"parse","name":"Parse + validate","type":"n8n-nodes-base.code","typeVersion":2,"position":[896,304]},{"parameters":{"respondWith":"json","responseBody":"={{ JSON.stringify({ reply: \"PENDING\", status: \"received\" }) }}","options":{}},"id":"respond","name":"Respond to Webhook","type":"n8n-nodes-base.respondToWebhook","typeVersion":1.5,"position":[1120,304]},{"parameters":{"operation":"appendOrUpdate","documentId":{"__rl":true,"mode":"id","value":"1T89p6LhpjwNJ_kqh5WT6DAj3Jt242Gs1JaTNzDCJJio"},"sheetName":{"__rl":true,"mode":"name","value":"leads_v2","cachedResultName":"leads_v2"},"columns":{"mappingMode":"defineBelow","matchingColumns":["ig_user_id"],"value":{"ig_user_id":"={{ $('Merge reply').item.json.ig_user_id }}","ig_username":"={{ $('Merge reply').item.json.ig_username }}","destination":"={{ $('Merge reply').item.json.destination }}","normalized_destination":"={{ $('Merge reply').item.json.normalized_destination }}","travel_date":"={{ $('Merge reply').item.json.travel_date }}","pax":"={{ $('Merge reply').item.json.pax }}","whatsapp_number":"={{ \"'\" + $('Merge reply').item.json.whatsapp_number }}","status":"={{ $('Merge reply').item.json.status }}","quick_assistance":"={{ $('Merge reply').item.json.quick_assistance }}","first_contact_ts":"={{ $('Merge reply').item.json.first_contact_ts }}","last_update_ts":"={{ $('Merge reply').item.json.last_update_ts }}","notes - AI":"={{ $('Merge reply').item.json.notes }}"},"schema":[{"id":"ig_user_id","displayName":"ig_user_id","type":"string","required":false,"display":true,"defaultMatch":true,"canBeUsedToMatch":true,"removed":false},{"id":"ig_username","displayName":"ig_username","type":"string","required":false,"display":true,"defaultMatch":false,"canBeUsedToMatch":true,"removed":false},{"id":"destination","displayName":"destination","type":"string","required":false,"display":true,"defaultMatch":false,"canBeUsedToMatch":true,"removed":false},{"id":"normalized_destination","displayName":"normalized_destination","type":"string","required":false,"display":true,"defaultMatch":false,"canBeUsedToMatch":true,"removed":false},{"id":"travel_date","displayName":"travel_date","type":"string","required":false,"display":true,"defaultMatch":false,"canBeUsedToMatch":true,"removed":false},{"id":"pax","displayName":"pax","type":"string","required":false,"display":true,"defaultMatch":false,"canBeUsedToMatch":true,"removed":false},{"id":"whatsapp_number","displayName":"whatsapp_number","type":"string","required":false,"display":true,"defaultMatch":false,"canBeUsedToMatch":true,"removed":false},{"id":"status","displayName":"status","type":"string","required":false,"display":true,"defaultMatch":false,"canBeUsedToMatch":true,"removed":false},{"id":"quick_assistance","displayName":"quick_assistance","type":"string","required":false,"display":true,"defaultMatch":false,"canBeUsedToMatch":true,"removed":false},{"id":"first_contact_ts","displayName":"first_contact_ts","type":"string","required":false,"display":true,"defaultMatch":false,"canBeUsedToMatch":true,"removed":false},{"id":"last_update_ts","displayName":"last_update_ts","type":"string","required":false,"display":true,"defaultMatch":false,"canBeUsedToMatch":true,"removed":false},{"id":"assigned_to","displayName":"assigned_to","type":"string","required":false,"display":true,"defaultMatch":false,"canBeUsedToMatch":true,"removed":false},{"id":"notes - AI","displayName":"notes - AI","type":"string","required":false,"display":true,"defaultMatch":false,"canBeUsedToMatch":true,"removed":false}],"attemptToConvertTypes":false,"convertFieldsToString":true},"options":{}},"id":"sheets","name":"Save lead","type":"n8n-nodes-base.googleSheets","typeVersion":4.7,"position":[1568,220],"credentials":{"googleSheetsOAuth2Api":{"id":"Bnb4dKAXJwcqzUWj","name":"Google Sheets account"}},"onError":"continueRegularOutput"},{"parameters":{"promptType":"define","text":"={{ $('Normalize input').item.json.user_message }}","options":{"systemMessage":"={{ $('Normalize input').item.json.system_prompt }}"}},"id":"agent","name":"AI Agent","type":"@n8n/n8n-nodes-langchain.agent","typeVersion":3,"position":[672,304],"onError":"continueErrorOutput"},{"parameters":{"model":{"__rl":true,"mode":"list","value":"gpt-4o-mini","cachedResultName":"gpt-4o-mini"},"responsesApiEnabled":false,"options":{"responseFormat":"json_object","temperature":0.35}},"id":"chatmodel","name":"OpenAI Chat Model","type":"@n8n/n8n-nodes-langchain.lmChatOpenAi","typeVersion":1.3,"position":[560,512],"credentials":{"openAiApi":{"id":"xNZip6hDSsmAroMc","name":"OpenAi account (WORKING June 2026)"}}},{"id":"lookup","name":"Lookup existing lead","type":"n8n-nodes-base.googleSheets","typeVersion":4.7,"position":[224,304],"parameters":{"operation":"read","documentId":{"__rl":true,"mode":"id","value":"1T89p6LhpjwNJ_kqh5WT6DAj3Jt242Gs1JaTNzDCJJio","cachedResultName":"Testing new bot"},"sheetName":{"__rl":true,"mode":"name","value":"leads_v2","cachedResultName":"leads_v2"},"filtersUI":{"values":[{"lookupColumn":"ig_user_id","lookupValue":"={{ $json.body.ig_user_id }}"}]},"options":{"returnFirstMatch":true},"range":"leads_v2!A:M"},"credentials":{"googleSheetsOAuth2Api":{"id":"Bnb4dKAXJwcqzUWj","name":"Google Sheets account"}},"onError":"continueRegularOutput","retryOnFail":true,"maxTries":2,"waitBetweenTries":1500,"alwaysOutputData":true},{"id":"5e7f4bfa-4d7f-458c-8013-450d732f00b3","name":"Simple Memory","type":"@n8n/n8n-nodes-langchain.memoryBufferWindow","typeVersion":1.3,"position":[760,512],"parameters":{"sessionIdType":"customKey","sessionKey":"={{ $('Webhook').item.json.body.ig_user_id }}","contextWindowLength":4}},{"id":"crmgate","name":"Newly qualified?","type":"n8n-nodes-base.if","typeVersion":2.2,"position":[1792,220],"parameters":{"conditions":{"options":{"version":2,"leftValue":"","caseSensitive":true,"typeValidation":"loose"},"conditions":[{"id":"cg1","leftValue":"={{ ($json.crm_push === true || String($json.quick_assistance).toLowerCase() === 'yes') && ((String($json.assigned_to || '').trim() === '') || (String($json.assigned_to).trim() === String($json.msg_id || '').trim())) }}","rightValue":true,"operator":{"type":"boolean","operation":"true","singleValue":true}}],"combinator":"and"},"options":{}}},{"id":"crmpush","name":"Push to CRM","type":"n8n-nodes-base.httpRequest","typeVersion":4.3,"position":[2016,140],"parameters":{"method":"POST","url":"https://n8n.srv1159219.hstgr.cloud/webhook/crm-lead-sync","sendBody":true,"contentType":"json","specifyBody":"keypair","bodyParameters":{"parameters":[{"name":"name","value":"={{ $('Merge reply').item.json.ig_username }}"},{"name":"handle","value":"={{ $('Merge reply').item.json.ig_username }}"},{"name":"contact_number","value":"={{ $('Merge reply').item.json.whatsapp_number }}"},{"name":"phone","value":"={{ $('Merge reply').item.json.whatsapp_number }}"},{"name":"destination","value":"={{ $('Merge reply').item.json.normalized_destination || $('Merge reply').item.json.destination }}"},{"name":"normalized_destination","value":"={{ $('Merge reply').item.json.normalized_destination || $('Merge reply').item.json.destination }}"},{"name":"travel_date","value":"={{ $('Merge reply').item.json.travel_date }}"},{"name":"travelers","value":"={{ $('Merge reply').item.json.pax }}"},{"name":"quick_assistance","value":"={{ $('Merge reply').item.json.quick_assistance }}"},{"name":"ig_username","value":"={{ $('Merge reply').item.json.ig_username }}"},{"name":"ig_user_id","value":"={{ $('Merge reply').item.json.ig_user_id }}"},{"name":"status","value":"={{ $('Merge reply').item.json.status }}"},{"name":"notes","value":"={{ $('Merge reply').item.json.notes }}"}]},"options":{}},"onError":"continueRegularOutput"},{"id":"3dd6b9fe-6399-441d-a59e-dca706016301","name":"Claim lock","type":"n8n-nodes-base.googleSheets","typeVersion":4.7,"position":[600,460],"parameters":{"operation":"appendOrUpdate","documentId":{"__rl":true,"mode":"id","value":"1T89p6LhpjwNJ_kqh5WT6DAj3Jt242Gs1JaTNzDCJJio","cachedResultName":"Testing new bot"},"sheetName":{"__rl":true,"mode":"name","value":"leads_v2","cachedResultName":"leads_v2"},"columns":{"mappingMode":"defineBelow","matchingColumns":["ig_user_id"],"value":{"ig_user_id":"={{ $('Normalize input').item.json.ig_user_id }}","assigned_to":"={{ $('Normalize input').item.json.msg_id }}"},"schema":[{"id":"ig_user_id","displayName":"ig_user_id","type":"string","required":false,"display":true,"defaultMatch":true,"canBeUsedToMatch":true,"removed":false},{"id":"ig_username","displayName":"ig_username","type":"string","required":false,"display":true,"defaultMatch":false,"canBeUsedToMatch":true,"removed":false},{"id":"destination","displayName":"destination","type":"string","required":false,"display":true,"defaultMatch":false,"canBeUsedToMatch":true,"removed":false},{"id":"normalized_destination","displayName":"normalized_destination","type":"string","required":false,"display":true,"defaultMatch":false,"canBeUsedToMatch":true,"removed":false},{"id":"travel_date","displayName":"travel_date","type":"string","required":false,"display":true,"defaultMatch":false,"canBeUsedToMatch":true,"removed":false},{"id":"pax","displayName":"pax","type":"string","required":false,"display":true,"defaultMatch":false,"canBeUsedToMatch":true,"removed":false},{"id":"whatsapp_number","displayName":"whatsapp_number","type":"string","required":false,"display":true,"defaultMatch":false,"canBeUsedToMatch":true,"removed":false},{"id":"status","displayName":"status","type":"string","required":false,"display":true,"defaultMatch":false,"canBeUsedToMatch":true,"removed":false},{"id":"quick_assistance","displayName":"quick_assistance","type":"string","required":false,"display":true,"defaultMatch":false,"canBeUsedToMatch":true,"removed":false},{"id":"first_contact_ts","displayName":"first_contact_ts","type":"string","required":false,"display":true,"defaultMatch":false,"canBeUsedToMatch":true,"removed":false},{"id":"last_update_ts","displayName":"last_update_ts","type":"string","required":false,"display":true,"defaultMatch":false,"canBeUsedToMatch":true,"removed":false},{"id":"assigned_to","displayName":"assigned_to","type":"string","required":false,"display":true,"defaultMatch":false,"canBeUsedToMatch":true,"removed":false},{"id":"notes - AI","displayName":"notes - AI","type":"string","required":false,"display":true,"defaultMatch":false,"canBeUsedToMatch":true,"removed":false}],"attemptToConvertTypes":false,"convertFieldsToString":true},"options":{}},"credentials":{"googleSheetsOAuth2Api":{"id":"Bnb4dKAXJwcqzUWj","name":"Google Sheets account"}},"onError":"continueRegularOutput"},{"id":"299113ef-44f7-46f3-8bc6-877e9dd72f7d","name":"Read lock","type":"n8n-nodes-base.googleSheets","typeVersion":4.7,"position":[1180,460],"parameters":{"operation":"read","documentId":{"__rl":true,"mode":"id","value":"1T89p6LhpjwNJ_kqh5WT6DAj3Jt242Gs1JaTNzDCJJio","cachedResultName":"Testing new bot"},"sheetName":{"__rl":true,"mode":"name","value":"leads_v2","cachedResultName":"leads_v2"},"filtersUI":{"values":[{"lookupColumn":"ig_user_id","lookupValue":"={{ $('Normalize input').item.json.ig_user_id }}"}]},"options":{"returnFirstMatch":true},"range":"leads_v2!A:M"},"credentials":{"googleSheetsOAuth2Api":{"id":"Bnb4dKAXJwcqzUWj","name":"Google Sheets account"}},"onError":"continueRegularOutput","alwaysOutputData":true},{"id":"9fda5b2e-98e0-4b7e-81b9-66dabf03b64b","name":"Winner?","type":"n8n-nodes-base.if","typeVersion":2.2,"position":[1320,500],"parameters":{"conditions":{"options":{"version":2,"leftValue":"","caseSensitive":true,"typeValidation":"loose"},"conditions":[{"id":"win1","leftValue":"={{ ((($json.assigned_to || '') === '') || (String($json.assigned_to).trim() === String($json.msg_id).trim())) }}","rightValue":true,"operator":{"type":"boolean","operation":"true","singleValue":true}}],"combinator":"and"},"options":{}}},{"id":"9f65fdbf-8b84-4bb4-97a4-ee75332b11c1","name":"Send reply (ManyChat)","type":"n8n-nodes-base.httpRequest","typeVersion":4.3,"position":[1540,480],"parameters":{"method":"POST","url":"https://api.manychat.com/fb/sending/sendContent","authentication":"genericCredentialType","genericAuthType":"httpHeaderAuth","sendBody":true,"contentType":"json","specifyBody":"json","jsonBody":"={{ JSON.stringify((function() { const p = $('Merge reply').first().json; const subscriber = $('Normalize input').first().json.ig_user_id; const contentType = $('Normalize input').first().json.channel || 'instagram'; const msg = { type: 'text', text: p.reply }; if (p.ask_quick_assistance === true) { msg.buttons = [{type:'reply',caption:'Yes'},{type:'reply',caption:'No'}]; } return { subscriber_id: subscriber, data: { version: 'v2', content: { type: contentType, messages: [msg] } } }; })()) }}","options":{"timeout":15000}},"credentials":{"httpHeaderAuth":{"id":"WRHI5I3GZm4zJCrl","name":"ManyChat API"}},"onError":"continueRegularOutput","retryOnFail":true,"maxTries":2,"waitBetweenTries":2000},{"parameters":{"conditions":{"options":{"version":2,"leftValue":"","caseSensitive":true,"typeValidation":"loose"},"conditions":[{"id":"btn1","leftValue":"={{ $('Normalize input').first().json.is_button_click }}","rightValue":true,"operator":{"type":"boolean","operation":"true","singleValue":true}}],"combinator":"and"},"options":{}},"id":"3443b06f-1ec5-45b3-ad3f-38e04bb432ac","name":"Button click?","type":"n8n-nodes-base.if","typeVersion":2.2,"position":[600,304]},{"parameters":{"jsCode":"// ─────────────────────────────────────────────────────────────────────────\n// NODE: \"Button handler\"  (Code node, \"Run Once for All Items\")\n// Handles Yes/No quick-assistance button clicks deterministically.\n// Runs when Normalize input detects is_button_click = true.\n//\n// Working hours (Mon–Sat): 9:00 AM – 5:30 PM IST.\n// Sunday: always after-hours (office closed) → \"tomorrow\" message.\n// ⚠️ Code node MUST return [{ json: { ... } }].\n// ─────────────────────────────────────────────────────────────────────────\n\nconst norm = $('Normalize input').first().json;\nconst knownF = norm.known_fields || {};\nconst buttonValue = norm.button_value || '';\n\nconst OB = String.fromCharCode(123) + String.fromCharCode(123);\nconst CB = String.fromCharCode(125) + String.fromCharCode(125);\nconst strip = (v) => { const t = (v === undefined || v === null) ? '' : String(v).trim(); return (t.slice(0, 2) === OB && t.slice(-2) === CB) ? '' : t; };\n\n// Current time in IST (UTC+5:30)\nconst now = new Date(Date.now() + 5.5 * 60 * 60 * 1000);\nconst day = now.getUTCDay();        // 0 = Sunday, 1 = Monday, ...\nconst hour = now.getUTCHours();\nconst minute = now.getUTCMinutes();\n\nlet reply = '';\nlet quickAssistance = '';\nlet crmPush = false;\n\nif (buttonValue === 'yes') {\n  quickAssistance = 'yes';\n  crmPush = true;\n  if (day === 0) {\n    reply = 'Thank you. Our travel consultant will reach you during working hours tomorrow (Monday, 9:00 AM – 5:30 PM).';\n  } else if (hour > 9 || (hour === 9 && minute >= 0)) {\n    // 9:00 AM or later\n    if (hour < 17 || (hour === 17 && minute <= 30)) {\n      reply = 'Our travel consultant will reach you shortly.';\n    } else {\n      reply = 'Thank you. Our travel consultant will reach you during working hours (9:00 AM – 5:30 PM).';\n    }\n  } else {\n    reply = 'Thank you. Our travel consultant will reach you during working hours (9:00 AM – 5:30 PM).';\n  }\n} else if (buttonValue === 'no') {\n  quickAssistance = 'no';\n  crmPush = false;\n  reply = 'Thank you for your time. Our travel consultant will still connect with you soon. Have a great day!';\n} else {\n  // Fallback (should never happen)\n  quickAssistance = '';\n  crmPush = false;\n  reply = 'Thanks so much for messaging Outbound Travellers! 😊 Our team will get back to you very shortly.';\n}\n\nconst nowIST = now.toISOString().replace('T', ' ').slice(0, 19);\nconst firstContact = (norm.existing_first_contact_ts && String(norm.existing_first_contact_ts).trim()) || nowIST;\n\nreturn [{\n  json: {\n    ig_user_id:          norm.ig_user_id,\n    ig_username:         norm.ig_username,\n    reply:               reply,\n    intent:              'travel_lead',\n    is_lead:             true,\n    destination:         strip(knownF.destination),\n    normalized_destination: strip(knownF.normalized_destination),\n    travel_date:         strip(knownF.travel_date),\n    pax:                 strip(knownF.pax),\n    whatsapp_number:     strip(knownF.whatsapp_number),\n    quick_assistance:    quickAssistance,\n    ask_quick_assistance: false,\n    notes:               strip(norm.existing_notes) || `Quick assistance: ${quickAssistance}`,\n    status:              'qualified',\n    crm_push:            crmPush,\n    first_contact_ts:    firstContact,\n    last_update_ts:      nowIST,\n    assigned_to:         '',\n    msg_id:              norm.msg_id || '',\n  },\n}];\n"},"id":"738ff3ea-0b8a-48be-bf4d-1af67df2be2b","name":"Button handler","type":"n8n-nodes-base.code","typeVersion":2,"position":[600,600]},{"parameters":{"mode":"append"},"id":"6420b864-5230-4f94-93fc-39a56a08343e","name":"Merge reply","type":"n8n-nodes-base.merge","typeVersion":2.1,"position":[1450,400]},{"id":"combine-lock-data","name":"Combine lock + data","type":"n8n-nodes-base.code","typeVersion":2,"position":[1480,240],"parameters":{"mode":"runOnceForAllItems","jsCode":"const lock = $input.first().json || {};\nconst data = $('Parse + validate').first().json || {};\nconst norm = $('Normalize input').first().json || {};\nreturn [{ json: { ...data, assigned_to: lock.assigned_to, msg_id: norm.msg_id } }];"}}],"connections":{"Webhook":{"main":[[{"node":"Respond to Webhook","type":"main","index":0}]]},"Respond to Webhook":{"main":[[{"node":"Lookup existing lead","type":"main","index":0}]]},"Lookup existing lead":{"main":[[{"node":"Normalize input","type":"main","index":0}]]},"Normalize input":{"main":[[{"node":"Button click?","type":"main","index":0}]]},"Button click?":{"main":[[{"node":"Button handler","type":"main","index":0}],[{"node":"Claim lock","type":"main","index":0}]]},"Button handler":{"main":[[{"node":"Merge reply","type":"main","index":0}]]},"Claim lock":{"main":[[{"node":"AI Agent","type":"main","index":0}]]},"AI Agent":{"main":[[{"node":"Parse + validate","type":"main","index":0}],[{"node":"Parse + validate","type":"main","index":0}]]},"OpenAI Chat Model":{"ai_languageModel":[[{"node":"AI Agent","type":"ai_languageModel","index":0}]]},"Simple Memory":{"ai_memory":[[{"node":"AI Agent","type":"ai_memory","index":0}]]},"Parse + validate":{"main":[[{"node":"Read lock","type":"main","index":0}]]},"Read lock":{"main":[[{"node":"Combine lock + data","type":"main","index":0}]]},"Winner?":{"main":[[{"node":"Merge reply","type":"main","index":1}]]},"Merge reply":{"main":[[{"node":"Save lead","type":"main","index":0},{"node":"Send reply (ManyChat)","type":"main","index":0}]]},"Save lead":{"main":[[{"node":"Newly qualified?","type":"main","index":0}]]},"Newly qualified?":{"main":[[{"node":"Push to CRM","type":"main","index":0}]]},"Combine lock + data":{"main":[[{"node":"Winner?","type":"main","index":0}]]}},"settings":{"executionOrder":"v1","timezone":"Asia/Kolkata","saveDataErrorExecution":"all","saveDataSuccessExecution":"all","saveExecutionProgress":true,"callerPolicy":"workflowsFromSameOwner","availableInMCP":false,"errorWorkflow":"f8JebCcUmgk137Li"},"staticData":{"global":{"lastMsgTs":{"TEST_BURST_0619":1781878736975},"seenMsg":{"388564705|Maldives package details":1782754840804,"388564705|Next month date yet to confirm":1782754870034,"388564705|Me and my husband":1782754893169,"388564705|We just married on June 17":1782754903454,"388564705|Sure":1782754913634,"388564705|6381101448":1782754934873,"388564705|No , you can ping me on what app":1782754971933,"1005346403|Hi":1782757206740,"1930042196|Hi":1782757423370,"1930042196|June 02":1782757446316,"1930042196|3":1782757460576,"1930042196|8148263133":1782757484800,"1930042196|Yes":1782757503124,"FAKEUSER_TONE|Bali":1782757980933,"FAKEUSER_TONE2|9876543210":1782758003691,"FAKEUSER_TONE3|9876543210":1782758064703,"FAKEUSER_TONE4|9876543210":1782758136700,"FAKEUSER_TONE5|June 02":1782758161298}}},"meta":null,"pinData":{},"versionId":"b0c8861b-c0f5-4824-814e-f657d5c6c8a5","versionCounter":853,"triggerCount":1,"shared":[{"updatedAt":"2026-05-29T08:12:54.162Z","createdAt":"2026-05-29T08:12:54.162Z","role":"workflow:owner","workflowId":"AfmPZXhWMetbxHTl","projectId":"rB3QZRABO7nl17PH","project":{"updatedAt":"2025-11-28T05:56:18.467Z","createdAt":"2025-11-28T05:42:25.923Z","id":"rB3QZRABO7nl17PH","name":"Outbound Travelers <outboundtravelers1@gmail.com>","type":"personal","icon":null,"description":null,"projectRelations":[{"updatedAt":"2025-11-28T05:42:25.924Z","createdAt":"2025-11-28T05:42:25.924Z","userId":"1f2bd6c5-af4f-4a36-8846-17c36547f8ac","projectId":"rB3QZRABO7nl17PH","user":{"updatedAt":"2026-06-29T18:32:34.000Z","createdAt":"2025-11-28T05:42:24.767Z","id":"1f2bd6c5-af4f-4a36-8846-17c36547f8ac","email":"outboundtravelers1@gmail.com","firstName":"Outbound","lastName":"Travelers","personalizationAnswers":{"version":"v4","personalization_survey_submitted_at":"2025-11-28T06:02:15.741Z","personalization_survey_n8n_version":"1.121.3","companyIndustryExtended":["other"],"otherCompanyIndustryExtended":"Travel and Tourism","companySize":"<20","companyType":"other","automationGoalSm":["lead-generation"],"role":"sales-and-marketing","reportedSource":"youtube"},"settings":{"userActivated":true,"firstSuccessfulWorkflowId":"8yGvAmoeoeT4pI2K","userActivatedAt":1765879592923,"npsSurvey":{"waitingForResponse":true,"ignoredCount":1,"lastShownAt":1782362054742},"easyAIWorkflowOnboarded":true},"disabled":false,"mfaEnabled":false,"lastActiveAt":"2026-06-29","isPending":false}}]}}],"tags":[]}
+{
+  "updatedAt": "2026-06-29T22:53:16.569Z",
+  "createdAt": "2026-05-29T08:12:54.158Z",
+  "id": "AfmPZXhWMetbxHTl",
+  "name": "Outbound IG Lead Bot â€” 1 Â· Chat & Capture",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ig-lead-bot",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        304
+      ],
+      "webhookId": "ig-lead-bot",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────────────────────────────\n// NODE: \"Normalize input\"  (Code node, mode: \"Run Once for All Items\")\n// Reads the user's message + IG ids from the Webhook, and any KNOWN field\n// values, then builds the rigid scripted system prompt. Persona is fixed:\n// always \"Rahul\" from Outbound Travellers.\n//\n// COLLECTION ORDER (strict, never deviate):\n//   1. destination          → ask \"which destination?\"\n//   2. travel_date          → ask \"when are you planning to travel?\"\n//   3. pax                  → ask \"how many people?\"\n//   4. whatsapp_number      → ask \"your contact number?\"\n//   5. quick_assistance     → send Yes/No button after phone is captured\n//\n// BUTTON-CLICK SHORTCUT:\n//   If the incoming message is exactly \"Yes\" or \"No\" AND we already have\n//   whatsapp_number filled AND quick_assistance is still empty, this turn is\n//   treated as a button click. We skip the AI Agent and handle it downstream.\n//\n// MEMORY — production design, 3 layers:\n//   1. Simple Memory (memoryBufferWindow) attached to the AI Agent.\n//   2. KNOWN FIELDS — merged from the Google Sheet row + ManyChat webhook body.\n//   3. NOTES — short one-line summary in the \"notes - AI\" column.\n//\n// ⚠️ Webhook payload lives under $json.body — read via $('Webhook').\n// ⚠️ The notes column header is literally \"notes - AI\" (with spaces).\n// ⚠️ Strip ManyChat unresolved merge tags (literal double-braces).\n// ⚠️ Code node MUST return [{ json: { ... } }].\n// NOTE: keep prompts/system_prompt.md in sync with this embedded prompt.\n// ─────────────────────────────────────────────────────────────────────────\n\nconst wh = $('Webhook').first().json.body || {};\nconst s = (v) => (v === undefined || v === null ? '' : String(v).trim());\nconst OB = String.fromCharCode(123) + String.fromCharCode(123);\nconst CB = String.fromCharCode(125) + String.fromCharCode(125);\nconst clean = (v) => { const t = s(v); return (t.slice(0, 2) === OB && t.slice(-2) === CB) ? '' : t; };\n// Prefer the sheet value; fall back to the value ManyChat passed in the body.\nconst pick = (a, b) => { const x = clean(a); return x !== '' ? x : clean(b); };\n\n// -- DEDUP LAYER 1: synchronous same-message guard. --\nconst _sd = $getWorkflowStaticData('global');\n_sd.seenMsg = _sd.seenMsg || {};\nconst _now = Date.now();\nfor (const _k in _sd.seenMsg) { if (_now - _sd.seenMsg[_k] > 3600000) delete _sd.seenMsg[_k]; }\nconst _dupKey = s(wh.ig_user_id) + '|' + s(wh.message_text);\nif (s(wh.ig_user_id) && s(wh.message_text) && _sd.seenMsg[_dupKey] && (_now - _sd.seenMsg[_dupKey] < 4000)) return [];\nif (_dupKey) _sd.seenMsg[_dupKey] = _now;\n// Unique per-execution token for the Layer-2 sheet ownership lock (last-writer-wins).\nconst _msgId = 'L' + _now + '-' + Math.floor(Math.random() * 1000000);\n\nlet row = {};\ntry {\n  const inItems = $input.all();\n  if (inItems && inItems.length && inItems[0] && inItems[0].json) {\n    const j = inItems[0].json;\n    if (j && (clean(j.destination) || clean(j.normalized_destination) || clean(j.travel_date) || clean(j.pax) || clean(j.whatsapp_number) || clean(j.quick_assistance) || clean(j['notes - AI']) || clean(j.first_contact_ts))) row = j;\n  }\n} catch (e) { row = {}; }\n\nconst userMsg = s(wh.message_text);\n\nconst known = {\n  destination:           pick(row.destination, wh.destination),\n  normalized_destination: pick(row.normalized_destination, wh.normalized_destination),\n  travel_date:           pick(row.travel_date, wh.travel_date),\n  pax:                   pick(row.pax, wh.pax),\n  whatsapp_number:       pick(row.whatsapp_number, wh.whatsapp_number),\n  quick_assistance:      pick(row.quick_assistance, wh.quick_assistance),\n};\n\n// -- CONVERSATION RESET RULE --\n// Start fresh if the user greets us OR if we haven't heard from them in >48 hours.\n// Robust IST timestamp parser (handles single-digit hours that Google Sheets may return).\nfunction parseIST(ts) {\n  const m = String(ts).trim().match(/^(\\d{4})-(\\d{1,2})-(\\d{1,2})[ T](\\d{1,2}):(\\d{2}):(\\d{2})$/);\n  if (!m) return NaN;\n  const [, y, mo, d, h, mi, s] = m.map(Number);\n  const pad = (n) => String(n).padStart(2, '0');\n  return new Date(`${y}-${pad(mo)}-${pad(d)}T${pad(h)}:${pad(mi)}:${pad(s)}+05:30`).getTime();\n}\n\n// -- 2-DAY MEMORY RULE --\n// Remember everything for 48h since the last message. A returning lead within\n// 48h CONTINUES where they left off (a plain \"Hi\" does NOT restart). After 48h\n// idle we forget (fields + memory) and the next message starts from the greeting.\n// A brand-new lead has no prior timestamp (hoursSince = Infinity) so they reset\n// → greeting, exactly like a >48h returner.\nconst lastUpdateTs = clean(row.last_update_ts) || clean(row.first_contact_ts);\nlet hoursSince = Infinity;\nif (lastUpdateTs) {\n  const lastMs = parseIST(lastUpdateTs);\n  if (!isNaN(lastMs)) hoursSince = (_now - lastMs) / (1000 * 60 * 60);\n}\nconst resetConversation = hoursSince > 48;\n\nif (resetConversation) {\n  known.destination = '';\n  known.normalized_destination = '';\n  known.travel_date = '';\n  known.pax = '';\n  known.whatsapp_number = '';\n  known.quick_assistance = '';\n}\nconst knownJson = JSON.stringify(known);\n\nconst hasDestination = !!(known.destination || known.normalized_destination);\nconst hasTravelDate = !!known.travel_date;\nconst hasPax = !!known.pax;\nconst hasPhone = !!known.whatsapp_number;\nconst hasQuickAssist = !!known.quick_assistance;\n\nlet existingFirstContact = clean(row.first_contact_ts);\nlet existingNotes = pick(row['notes - AI'], wh.notes);\n\nif (resetConversation) {\n  existingFirstContact = '';\n  existingNotes = '';\n}\n\n// -- CONVERSATION EPOCH (memory-session isolation) --\n// first_contact_ts doubles as the conversation epoch. It is stable for the life\n// of a conversation but rotates whenever we reset (>48h idle, so existingFirstContact\n// was just cleared). The AI's Simple Memory is keyed by this epoch, so a reset\n// starts a FRESH memory session — that is what makes the bot \"forget after 2 days\".\nconst nowISTstr = new Date(_now + 5.5 * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);\nconst convFirstContact = existingFirstContact || nowISTstr;\n// Key the memory session off the PARSED epoch (ms), not the raw string — Google Sheets\n// reformats the saved timestamp on read-back (e.g. strips the leading zero from the hour),\n// which would otherwise split one conversation across two memory buckets.\nconst _epochMs = parseIST(convFirstContact);\nconst sessionKey = s(wh.ig_user_id) + '|' + (isNaN(_epochMs) ? convFirstContact : _epochMs);\n\nconst notesBlock = existingNotes ? existingNotes : '(none yet — fresh conversation)';\n// \"We've already started this conversation\" — true once a row exists within the\n// 48h window (so the greeting fires exactly once per conversation, never twice).\nconst priorChat = !resetConversation && (!!existingFirstContact || hasDestination || hasTravelDate || hasPax || hasPhone || hasQuickAssist || !!existingNotes);\n\nconst igFullName = clean(wh.ig_fullname);\nconst igUsername = s(wh.ig_username);\nconst channel = (clean(wh.channel) || 'instagram').toLowerCase();\nconst channelLabel = channel === 'instagram' ? 'instagram' : 'facebook';\n\n// Detect a Yes/No button click at the quick-assistance step.\nconst isButtonClick = (\n  (userMsg.toLowerCase() === 'yes' || userMsg.toLowerCase() === 'no') &&\n  hasPhone &&\n  !hasQuickAssist\n);\nconst buttonValue = isButtonClick ? userMsg.toLowerCase() : '';\n\nconst WA = '+91 9597959728';\nconst WA_LINK = 'https://wa.me/919597959728';\n\n// ── EXTRACTOR-ONLY PROMPT ────────────────────────────────────────────────\n// The AI does NOT chat and does NOT write replies. It ONLY pulls field values\n// out of the user's message and normalizes the destination. The conversation\n// wording is 100% scripted downstream in \"Parse + validate\" — this keeps the\n// agent on rails (no improvising, no extra questions, no off-script chatter).\nconst systemPrompt = `You are a silent data-extraction engine for Outbound Travellers, a travel agency. You do NOT chat. You NEVER write a message to the user. You ONLY read the user's latest message together with the KNOWN FIELDS already collected, and return updated field values as JSON.\n\n## FIELDS YOU EXTRACT (only these four — capture any the user volunteers)\n1. destination        — the place they want to travel to.\n2. travel_date        — when they plan to travel. Free text is fine: \"15th August\", \"next month\", \"flexible\".\n3. pax                — number of people travelling. Convert clear phrases to a number (\"me and my wife\" → \"2\", \"just me\" → \"1\"); otherwise keep the short phrase.\n4. whatsapp_number    — their contact / WhatsApp number, exactly as typed (validation happens downstream).\n\n## HARD RULES\n- Extract ONLY what the user actually provided in THIS message or already-known values. NEVER invent, guess, or assume a value. If the message has nothing for a field, keep the KNOWN value (or empty).\n- If the user gives several fields in one message, capture ALL of them.\n- You do NOT decide what to ask next. You do NOT greet, acknowledge, or reply. Output JSON only.\n- IGNORE anything outside the four fields (budget, name, hotel, flight, itinerary). Do not store them.\n\n## DESTINATION NORMALIZATION (important)\nAlways also return \"normalized_destination\" = the correct, canonical destination name — fix misspellings and resolve partial/loose names to the proper place:\n- \"Jammu\" / \"kashmir\" / \"i want to explore kashmir\" / \"kashmeer\" → \"Jammu and Kashmir\"\n- \"balli\" / \"bali island\" / \"bally\" → \"Bali\"\n- \"goa beach\" / \"gova\" → \"Goa\"\n- \"kerela\" / \"kerla\" → \"Kerala\"\n- \"andaman\" / \"andmaan\" → \"Andaman and Nicobar Islands\"\nIf you cannot recognize a real place, set \"destination\" to what they typed and leave \"normalized_destination\" empty.\n\n## NOTES\nReturn \"notes\" = one short English line summarizing what is known so far (max ~20 words).\n\n## OUTPUT — return ONLY this JSON. No markdown, no code fences, no preamble, no reply text.\n{\"fields\":{\"destination\":\"\",\"normalized_destination\":\"\",\"travel_date\":\"\",\"pax\":\"\",\"whatsapp_number\":\"\"},\"notes\":\"<one short line>\",\"status\":\"new | in_progress | qualified\"}\n\nKNOWN FIELDS: ${knownJson}`;\n\nreturn [{\n  json: {\n    ig_user_id:                s(wh.ig_user_id),\n    ig_username:               igUsername,\n    ig_fullname:               igFullName,\n    user_message:              userMsg,\n    known_fields:              known,\n    known_fields_json:         knownJson,\n    prior_chat:                priorChat,\n    existing_first_contact_ts: existingFirstContact,\n    conv_first_contact:        convFirstContact,\n    session_key:               sessionKey,\n    existing_notes:            existingNotes,\n    system_prompt:             systemPrompt,\n    msg_id:                    _msgId,\n    channel:                   channel,\n    channel_label:             channelLabel,\n    is_button_click:           isButtonClick,\n    button_value:              buttonValue,\n  },\n}];\n"
+      },
+      "id": "normalize",
+      "name": "Normalize input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────────────────────────────\n// NODE: \"Parse + validate\"  (Code node, \"Run Once for All Items\")\n// Parses the AI Agent JSON output for the new Rahul scripted flow.\n// Validates the WhatsApp number, merges fields over known ones, computes\n// status, and keeps the running one-line notes summary.\n// ⚠️ Code node MUST return [{ json: { ... } }].\n// ─────────────────────────────────────────────────────────────────────────\n\n// Core 4 fields. A lead is \"qualified\" once all four are captured.\nconst QUALIFY = ['destination', 'travel_date', 'pax', 'whatsapp_number'];\nconst FIELDS = ['destination', 'normalized_destination', 'travel_date', 'pax', 'whatsapp_number'];\n\n// 1. Grab the raw LLM text (AI Agent → $json.output; other shapes as fallback).\nconst up = $json || {};\nlet raw = '';\nif (typeof up.output === 'string') raw = up.output;\nelse if (up.output && typeof up.output === 'object') raw = JSON.stringify(up.output);\nelse if (up.message && typeof up.message.content === 'string') raw = up.message.content;\nelse if (up.choices && up.choices[0] && up.choices[0].message) raw = up.choices[0].message.content;\nelse if (typeof up.text === 'string') raw = up.text;\nelse if (typeof up.content === 'string') raw = up.content;\n\n// 2. Strip stray ```json fences, parse safely.\nlet parsed = null;\ntry {\n  const cleaned = String(raw).replace(/```json/gi, '').replace(/```/g, '').trim();\n  if (cleaned) parsed = JSON.parse(cleaned);\n} catch (e) { parsed = null; }\n\n// 3. Safe fallback — malformed JSON / AI failure must not crash the flow.\nif (!parsed || typeof parsed !== 'object') {\n  parsed = {\n    reply: 'Thanks so much for messaging Outbound Travellers! 😊 Our team will get back to you very shortly.',\n    intent: 'travel_lead',\n    fields: {},\n    ask_quick_assistance: false,\n    notes: '',\n    status: 'in_progress',\n  };\n}\n\n// 4. Validate intent.\nconst VALID = ['travel_lead', 'office_info', 'career', 'customer_query'];\nlet intent = (parsed.intent && String(parsed.intent).trim()) || 'travel_lead';\nif (VALID.indexOf(intent) === -1) intent = 'travel_lead';\n\nconst llmFields = (parsed.fields && typeof parsed.fields === 'object') ? parsed.fields : {};\nconst norm = $('Normalize input').first().json;\nconst knownF = norm.known_fields || {};\n\nconst OB = String.fromCharCode(123) + String.fromCharCode(123);\nconst CB = String.fromCharCode(125) + String.fromCharCode(125);\nconst strip = (v) => { const t = (v === undefined || v === null) ? '' : String(v).trim(); return (t.slice(0, 2) === OB && t.slice(-2) === CB) ? '' : t; };\n\nfunction cleanPhone(v) {\n  if (!v) return '';\n  let d = String(v).replace(/\\D/g, '');\n  // Indian 10-digit mobile (optionally written with 91 / 0 / +91) -> '+91 xxxxx xxxxx'\n  let in10 = d;\n  if (in10.length === 12 && in10.startsWith('91')) in10 = in10.slice(2);\n  else if (in10.length === 11 && in10.startsWith('0')) in10 = in10.slice(1);\n  if (in10.length === 10 && /^[6-9]/.test(in10)) return '+91 ' + in10.slice(0, 5) + ' ' + in10.slice(5);\n  // International number (came with its own country code / + sign) -> keep it, with the +\n  const hadPlus = String(v).trim().charAt(0) === '+';\n  if (d.startsWith('00')) d = d.slice(2);\n  if (hadPlus || (d.length >= 11 && d.length <= 15)) return '+' + d;\n  return '';\n}\n\n// 5. Merge. For non-travel intents, don't let the LLM invent lead data.\nconst takeLLM = (intent === 'travel_lead');\nconst merged = {};\nfor (const f of FIELDS) {\n  const nv = takeLLM ? strip(llmFields[f]) : '';\n  const kv = strip(knownF[f]);\n  merged[f] = nv !== '' ? nv : kv;\n}\nmerged.whatsapp_number = cleanPhone(merged.whatsapp_number);\n\n// If the AI returned a destination but no normalized_destination, fall back to destination.\nif (!merged.normalized_destination && merged.destination) {\n  merged.normalized_destination = merged.destination;\n}\n\n// 6. Notes (running summary). Take the LLM's fresh summary when it gave one.\nconst newNotes = strip(parsed.notes);\nconst prevNotes = strip(norm.existing_notes);\nconst notes = newNotes !== '' ? newNotes : prevNotes;\n\n// 7. Status: qualified once the core 4 are filled; in_progress if anything captured.\nconst qualified = QUALIFY.every((f) => merged[f] && merged[f] !== '');\nconst anyFilled = FIELDS.some((f) => merged[f] && merged[f] !== '');\nconst status = qualified ? 'qualified' : (anyFilled ? 'in_progress' : 'new');\n\n// 8. DETERMINISTIC SCRIPTED REPLY — the AI only extracts fields; every line the\n//    customer sees is fixed here, so the agent cannot improvise or go off-script.\n//    Pick the message for the next missing field, in strict order:\n//    destination → travel_date → pax → whatsapp_number → quick-assistance.\nconst hasDest  = !!(merged.destination || merged.normalized_destination);\nconst hasDate  = !!merged.travel_date;\nconst hasPaxF  = !!merged.pax;\nconst hasPhone = !!(merged.whatsapp_number && merged.whatsapp_number !== '');\nconst priorChat = norm.prior_chat === true;\n\n// Ask quick-assistance once all four are captured and it isn't already answered.\nconst askQuickAssist = hasDest && hasDate && hasPaxF && hasPhone && !strip(knownF.quick_assistance);\n\nlet replyText;\nif (askQuickAssist) {\n  replyText = 'Thanks for your cooperation. Do you need quick assistance?';\n} else if (!hasDest) {\n  // First contact gets the full intro; a continuing chat just re-asks for destination.\n  replyText = priorChat\n    ? 'May I know which destination you are looking for?'\n    : 'Hi, this is Rahul from Outbound Travellers. Thank you for contacting us. May I know which destination you are looking for?';\n} else if (!hasDate) {\n  replyText = 'Great choice! When are you planning to travel?';\n} else if (!hasPaxF) {\n  replyText = 'Great. May I know the number of people travelling?';\n} else if (!hasPhone) {\n  replyText = 'Thanks for the information. Could you please share your contact number so our travel consultant can help you with the trip details?';\n} else {\n  // All four captured and quick-assistance already answered.\n  replyText = 'Thank you! Our travel consultant will get back to you shortly.';\n}\n\n// 9. CRM push is handled by the Button handler on a Yes click (not on the phone turn).\nconst crmPush = false;\n\n// 10. Timestamps. Use the conversation epoch from Normalize as first_contact_ts so the\n//     saved value matches the memory session key (both rotate together on a >48h reset).\nconst nowIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);\nconst firstContact = (norm.conv_first_contact && String(norm.conv_first_contact).trim())\n  || (norm.existing_first_contact_ts && String(norm.existing_first_contact_ts).trim())\n  || nowIST;\n\nreturn [{\n  json: {\n    ig_user_id:          norm.ig_user_id,\n    ig_username:         norm.ig_username,\n    reply:               replyText,\n    intent,\n    is_lead:             !!(merged.whatsapp_number && merged.whatsapp_number !== ''),\n    destination:         merged.destination,\n    normalized_destination: merged.normalized_destination,\n    travel_date:         merged.travel_date,\n    pax:                 merged.pax,\n    whatsapp_number:     merged.whatsapp_number,\n    quick_assistance:    '',\n    ask_quick_assistance: askQuickAssist,\n    notes,\n    status,\n    crm_push:            crmPush,\n    first_contact_ts:    firstContact,\n    last_update_ts:      nowIST,\n  },\n}];\n"
+      },
+      "id": "parse",
+      "name": "Parse + validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ reply: \"PENDING\", status: \"received\" }) }}",
+        "options": {}
+      },
+      "id": "respond",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1120,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1T89p6LhpjwNJ_kqh5WT6DAj3Jt242Gs1JaTNzDCJJio"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "leads_v2",
+          "cachedResultName": "leads_v2"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "ig_user_id"
+          ],
+          "value": {
+            "ig_user_id": "={{ $('Merge reply').item.json.ig_user_id }}",
+            "ig_username": "={{ $('Merge reply').item.json.ig_username }}",
+            "destination": "={{ $('Merge reply').item.json.destination }}",
+            "normalized_destination": "={{ $('Merge reply').item.json.normalized_destination }}",
+            "travel_date": "={{ $('Merge reply').item.json.travel_date }}",
+            "pax": "={{ $('Merge reply').item.json.pax }}",
+            "whatsapp_number": "={{ \"'\" + $('Merge reply').item.json.whatsapp_number }}",
+            "status": "={{ $('Merge reply').item.json.status }}",
+            "quick_assistance": "={{ $('Merge reply').item.json.quick_assistance }}",
+            "first_contact_ts": "={{ $('Merge reply').item.json.first_contact_ts }}",
+            "last_update_ts": "={{ $('Merge reply').item.json.last_update_ts }}",
+            "notes - AI": "={{ $('Merge reply').item.json.notes }}"
+          },
+          "schema": [
+            {
+              "id": "ig_user_id",
+              "displayName": "ig_user_id",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "ig_username",
+              "displayName": "ig_username",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "destination",
+              "displayName": "destination",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "normalized_destination",
+              "displayName": "normalized_destination",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "travel_date",
+              "displayName": "travel_date",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "pax",
+              "displayName": "pax",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "whatsapp_number",
+              "displayName": "whatsapp_number",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "quick_assistance",
+              "displayName": "quick_assistance",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "first_contact_ts",
+              "displayName": "first_contact_ts",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "last_update_ts",
+              "displayName": "last_update_ts",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "assigned_to",
+              "displayName": "assigned_to",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "notes - AI",
+              "displayName": "notes - AI",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "id": "sheets",
+      "name": "Save lead",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1568,
+        220
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "Bnb4dKAXJwcqzUWj",
+          "name": "Google Sheets account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $('Normalize input').item.json.user_message }}",
+        "options": {
+          "systemMessage": "={{ $('Normalize input').item.json.system_prompt }}"
+        }
+      },
+      "id": "agent",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        672,
+        304
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o-mini",
+          "cachedResultName": "gpt-4o-mini"
+        },
+        "responsesApiEnabled": false,
+        "options": {
+          "responseFormat": "json_object",
+          "temperature": 0.35
+        }
+      },
+      "id": "chatmodel",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        560,
+        512
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "xNZip6hDSsmAroMc",
+          "name": "OpenAi account (WORKING June 2026)"
+        }
+      }
+    },
+    {
+      "id": "lookup",
+      "name": "Lookup existing lead",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        224,
+        304
+      ],
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1T89p6LhpjwNJ_kqh5WT6DAj3Jt242Gs1JaTNzDCJJio",
+          "cachedResultName": "Testing new bot"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "leads_v2",
+          "cachedResultName": "leads_v2"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "ig_user_id",
+              "lookupValue": "={{ $json.body.ig_user_id }}"
+            }
+          ]
+        },
+        "options": {
+          "returnFirstMatch": true
+        },
+        "range": "leads_v2!A:M"
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "Bnb4dKAXJwcqzUWj",
+          "name": "Google Sheets account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1500,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "5e7f4bfa-4d7f-458c-8013-450d732f00b3",
+      "name": "Simple Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        760,
+        512
+      ],
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Normalize input').item.json.session_key }}",
+        "contextWindowLength": 4
+      }
+    },
+    {
+      "id": "crmgate",
+      "name": "Newly qualified?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1792,
+        220
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cg1",
+              "leftValue": "={{ ($json.crm_push === true || String($json.quick_assistance).toLowerCase() === 'yes') && ((String($json.assigned_to || '').trim() === '') || (String($json.assigned_to).trim() === String($json.msg_id || '').trim())) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "crmpush",
+      "name": "Push to CRM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2016,
+        140
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://n8n.srv1159219.hstgr.cloud/webhook/crm-lead-sync",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "keypair",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "name",
+              "value": "={{ $('Merge reply').item.json.ig_username }}"
+            },
+            {
+              "name": "handle",
+              "value": "={{ $('Merge reply').item.json.ig_username }}"
+            },
+            {
+              "name": "contact_number",
+              "value": "={{ $('Merge reply').item.json.whatsapp_number }}"
+            },
+            {
+              "name": "phone",
+              "value": "={{ $('Merge reply').item.json.whatsapp_number }}"
+            },
+            {
+              "name": "destination",
+              "value": "={{ $('Merge reply').item.json.normalized_destination || $('Merge reply').item.json.destination }}"
+            },
+            {
+              "name": "normalized_destination",
+              "value": "={{ $('Merge reply').item.json.normalized_destination || $('Merge reply').item.json.destination }}"
+            },
+            {
+              "name": "travel_date",
+              "value": "={{ $('Merge reply').item.json.travel_date }}"
+            },
+            {
+              "name": "travelers",
+              "value": "={{ $('Merge reply').item.json.pax }}"
+            },
+            {
+              "name": "quick_assistance",
+              "value": "={{ $('Merge reply').item.json.quick_assistance }}"
+            },
+            {
+              "name": "ig_username",
+              "value": "={{ $('Merge reply').item.json.ig_username }}"
+            },
+            {
+              "name": "ig_user_id",
+              "value": "={{ $('Merge reply').item.json.ig_user_id }}"
+            },
+            {
+              "name": "status",
+              "value": "={{ $('Merge reply').item.json.status }}"
+            },
+            {
+              "name": "notes",
+              "value": "={{ $('Merge reply').item.json.notes }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "3dd6b9fe-6399-441d-a59e-dca706016301",
+      "name": "Claim lock",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        600,
+        460
+      ],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1T89p6LhpjwNJ_kqh5WT6DAj3Jt242Gs1JaTNzDCJJio",
+          "cachedResultName": "Testing new bot"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "leads_v2",
+          "cachedResultName": "leads_v2"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "ig_user_id"
+          ],
+          "value": {
+            "ig_user_id": "={{ $('Normalize input').item.json.ig_user_id }}",
+            "assigned_to": "={{ $('Normalize input').item.json.msg_id }}"
+          },
+          "schema": [
+            {
+              "id": "ig_user_id",
+              "displayName": "ig_user_id",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "ig_username",
+              "displayName": "ig_username",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "destination",
+              "displayName": "destination",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "normalized_destination",
+              "displayName": "normalized_destination",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "travel_date",
+              "displayName": "travel_date",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "pax",
+              "displayName": "pax",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "whatsapp_number",
+              "displayName": "whatsapp_number",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "quick_assistance",
+              "displayName": "quick_assistance",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "first_contact_ts",
+              "displayName": "first_contact_ts",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "last_update_ts",
+              "displayName": "last_update_ts",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "assigned_to",
+              "displayName": "assigned_to",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "notes - AI",
+              "displayName": "notes - AI",
+              "type": "string",
+              "required": false,
+              "display": true,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "Bnb4dKAXJwcqzUWj",
+          "name": "Google Sheets account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "299113ef-44f7-46f3-8bc6-877e9dd72f7d",
+      "name": "Read lock",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1180,
+        460
+      ],
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1T89p6LhpjwNJ_kqh5WT6DAj3Jt242Gs1JaTNzDCJJio",
+          "cachedResultName": "Testing new bot"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "leads_v2",
+          "cachedResultName": "leads_v2"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "ig_user_id",
+              "lookupValue": "={{ $('Normalize input').item.json.ig_user_id }}"
+            }
+          ]
+        },
+        "options": {
+          "returnFirstMatch": true
+        },
+        "range": "leads_v2!A:M"
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "Bnb4dKAXJwcqzUWj",
+          "name": "Google Sheets account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "id": "9fda5b2e-98e0-4b7e-81b9-66dabf03b64b",
+      "name": "Winner?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1320,
+        500
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "win1",
+              "leftValue": "={{ ((($json.assigned_to || '') === '') || (String($json.assigned_to).trim() === String($json.msg_id).trim())) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "9f65fdbf-8b84-4bb4-97a4-ee75332b11c1",
+      "name": "Send reply (ManyChat)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1540,
+        480
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.manychat.com/fb/sending/sendContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify((function() {\n  const p = $('Merge reply').first().json;\n  const subscriber = $('Normalize input').first().json.ig_user_id;\n  const contentType = $('Normalize input').first().json.channel || 'instagram';\n  const content = { type: contentType, messages: [{ type: 'text', text: p.reply }] };\n  if (p.ask_quick_assistance === true) {\n    content.quick_replies = [\n      { type: 'flow', caption: 'Yes', target: 'ig_default' },\n      { type: 'flow', caption: 'No', target: 'ig_default' }\n    ];\n  }\n  return { subscriber_id: subscriber, data: { version: 'v2', content } };\n})()) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "WRHI5I3GZm4zJCrl",
+          "name": "ManyChat API"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "btn1",
+              "leftValue": "={{ $('Normalize input').first().json.is_button_click }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3443b06f-1ec5-45b3-ad3f-38e04bb432ac",
+      "name": "Button click?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        600,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────────────────────────────\n// NODE: \"Button handler\"  (Code node, \"Run Once for All Items\")\n// Handles the Yes/No quick-assistance button click deterministically (no AI).\n// Runs when Normalize input detects is_button_click = true.\n//\n// Working hours: Monday–Saturday, 9:00 AM – 5:30 PM IST. Sunday is a full holiday.\n// Anything outside that (before 9:00, from 5:30 PM onward, or any time Sunday) = \"after-hours\".\n//\n//   Yes + within hours  → \"Our travel consultant will reach you shortly.\"\n//   Yes + after-hours   → \"...will reach you during our working hours (9:00 AM – 5:30 PM).\"\n//   No                  → polite thank-you, end of chat.\n//   Yes (either case)   → tag the lead quick_assistance = \"yes\" + push to CRM.\n//\n// ⚠️ Code node MUST return [{ json: { ... } }].\n// ─────────────────────────────────────────────────────────────────────────\n\nconst norm = $('Normalize input').first().json;\nconst knownF = norm.known_fields || {};\nconst buttonValue = norm.button_value || '';\n\nconst OB = String.fromCharCode(123) + String.fromCharCode(123);\nconst CB = String.fromCharCode(125) + String.fromCharCode(125);\nconst strip = (v) => { const t = (v === undefined || v === null) ? '' : String(v).trim(); return (t.slice(0, 2) === OB && t.slice(-2) === CB) ? '' : t; };\n\n// Current time in IST (UTC+5:30).\nconst now = new Date(Date.now() + 5.5 * 60 * 60 * 1000);\nconst day = now.getUTCDay();                       // 0 = Sunday, 6 = Saturday\nconst minutes = now.getUTCHours() * 60 + now.getUTCMinutes();\nconst WORK_START = 9 * 60;                          // 9:00 AM\nconst WORK_END = 17 * 60 + 30;                      // 5:30 PM\nconst withinHours = (day !== 0) && (minutes >= WORK_START) && (minutes < WORK_END);  // Sunday (day 0) = full holiday\n\nlet reply = '';\nlet quickAssistance = '';\nlet crmPush = false;\n\nif (buttonValue === 'yes') {\n  quickAssistance = 'yes';\n  crmPush = true;\n  reply = withinHours\n    ? 'Our travel consultant will reach you shortly.'\n    : 'Thank you! Our travel consultant will reach you during our working hours (9:00 AM – 5:30 PM).';\n} else if (buttonValue === 'no') {\n  quickAssistance = 'no';\n  crmPush = false;\n  reply = 'Thank you! Have a great day. Our travel consultant will still connect with you soon.';\n} else {\n  // Fallback (should never happen — Button handler only runs on a Yes/No click).\n  quickAssistance = '';\n  crmPush = false;\n  reply = 'Thank you! Our team will get back to you shortly.';\n}\n\nconst nowIST = now.toISOString().replace('T', ' ').slice(0, 19);\nconst firstContact = (norm.conv_first_contact && String(norm.conv_first_contact).trim())\n  || (norm.existing_first_contact_ts && String(norm.existing_first_contact_ts).trim())\n  || nowIST;\n\nreturn [{\n  json: {\n    ig_user_id:          norm.ig_user_id,\n    ig_username:         norm.ig_username,\n    reply:               reply,\n    intent:              'travel_lead',\n    is_lead:             true,\n    destination:         strip(knownF.destination),\n    normalized_destination: strip(knownF.normalized_destination),\n    travel_date:         strip(knownF.travel_date),\n    pax:                 strip(knownF.pax),\n    whatsapp_number:     strip(knownF.whatsapp_number),\n    quick_assistance:    quickAssistance,\n    ask_quick_assistance: false,\n    notes:               strip(norm.existing_notes) || ('Quick assistance: ' + quickAssistance),\n    status:              'qualified',\n    crm_push:            crmPush,\n    first_contact_ts:    firstContact,\n    last_update_ts:      nowIST,\n    assigned_to:         '',\n    msg_id:              norm.msg_id || '',\n  },\n}];\n"
+      },
+      "id": "738ff3ea-0b8a-48be-bf4d-1af67df2be2b",
+      "name": "Button handler",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        600,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "append"
+      },
+      "id": "6420b864-5230-4f94-93fc-39a56a08343e",
+      "name": "Merge reply",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [
+        1450,
+        400
+      ]
+    },
+    {
+      "id": "combine-lock-data",
+      "name": "Combine lock + data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1480,
+        240
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const lock = $input.first().json || {};\nconst data = $('Parse + validate').first().json || {};\nconst norm = $('Normalize input').first().json || {};\nreturn [{ json: { ...data, assigned_to: lock.assigned_to, msg_id: norm.msg_id } }];"
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "hp1",
+              "leftValue": "={{ true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "hasphone",
+      "name": "Has phone?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1510,
+        320
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond to Webhook": {
+      "main": [
+        [
+          {
+            "node": "Lookup existing lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup existing lead": {
+      "main": [
+        [
+          {
+            "node": "Normalize input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize input": {
+      "main": [
+        [
+          {
+            "node": "Button click?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Button click?": {
+      "main": [
+        [
+          {
+            "node": "Button handler",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Claim lock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Button handler": {
+      "main": [
+        [
+          {
+            "node": "Merge reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim lock": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Parse + validate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Parse + validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse + validate": {
+      "main": [
+        [
+          {
+            "node": "Read lock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read lock": {
+      "main": [
+        [
+          {
+            "node": "Combine lock + data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Winner?": {
+      "main": [
+        [
+          {
+            "node": "Merge reply",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge reply": {
+      "main": [
+        [
+          {
+            "node": "Has phone?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send reply (ManyChat)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save lead": {
+      "main": [
+        [
+          {
+            "node": "Newly qualified?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Newly qualified?": {
+      "main": [
+        [
+          {
+            "node": "Push to CRM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine lock + data": {
+      "main": [
+        [
+          {
+            "node": "Winner?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has phone?": {
+      "main": [
+        [
+          {
+            "node": "Save lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Kolkata",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "f8JebCcUmgk137Li"
+  },
+  "staticData": {
+    "global": {}
+  },
+  "meta": null,
+  "pinData": {},
+  "versionId": "b7c4383a-c97b-44b1-995b-a0772777656d",
+  "versionCounter": 949,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-05-29T08:12:54.162Z",
+      "createdAt": "2026-05-29T08:12:54.162Z",
+      "role": "workflow:owner",
+      "workflowId": "AfmPZXhWMetbxHTl",
+      "projectId": "rB3QZRABO7nl17PH",
+      "project": {
+        "updatedAt": "2025-11-28T05:56:18.467Z",
+        "createdAt": "2025-11-28T05:42:25.923Z",
+        "id": "rB3QZRABO7nl17PH",
+        "name": "Outbound Travelers <outboundtravelers1@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "projectRelations": [
+          {
+            "updatedAt": "2025-11-28T05:42:25.924Z",
+            "createdAt": "2025-11-28T05:42:25.924Z",
+            "userId": "1f2bd6c5-af4f-4a36-8846-17c36547f8ac",
+            "projectId": "rB3QZRABO7nl17PH",
+            "user": {
+              "updatedAt": "2026-06-29T21:59:48.000Z",
+              "createdAt": "2025-11-28T05:42:24.767Z",
+              "id": "1f2bd6c5-af4f-4a36-8846-17c36547f8ac",
+              "email": "outboundtravelers1@gmail.com",
+              "firstName": "Outbound",
+              "lastName": "Travelers",
+              "personalizationAnswers": {
+                "version": "v4",
+                "personalization_survey_submitted_at": "2025-11-28T06:02:15.741Z",
+                "personalization_survey_n8n_version": "1.121.3",
+                "companyIndustryExtended": [
+                  "other"
+                ],
+                "otherCompanyIndustryExtended": "Travel and Tourism",
+                "companySize": "<20",
+                "companyType": "other",
+                "automationGoalSm": [
+                  "lead-generation"
+                ],
+                "role": "sales-and-marketing",
+                "reportedSource": "youtube"
+              },
+              "settings": {
+                "userActivated": true,
+                "firstSuccessfulWorkflowId": "8yGvAmoeoeT4pI2K",
+                "userActivatedAt": 1765879592923,
+                "npsSurvey": {
+                  "waitingForResponse": true,
+                  "ignoredCount": 1,
+                  "lastShownAt": 1782362054742
+                },
+                "easyAIWorkflowOnboarded": true
+              },
+              "disabled": false,
+              "mfaEnabled": false,
+              "lastActiveAt": "2026-06-29",
+              "isPending": false
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "tags": []
+}
