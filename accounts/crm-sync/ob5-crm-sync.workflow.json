@@ -92,7 +92,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "https://app.187-127-180-241.sslip.io/tms/api/ingest",
+        "url": "https://app.187-127-191-151.sslip.io/tms/api/ingest",
         "sendBody": true,
         "contentType": "json",
         "specifyBody": "json",
