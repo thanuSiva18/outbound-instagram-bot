@@ -1494,7 +1494,6 @@
     "callerPolicy": "workflowsFromSameOwner",
     "availableInMCP": false
   },
-  "staticData": null,
   "meta": null,
   "pinData": null,
   "versionId": "3228a28f-f016-4add-a065-d205328d6730",

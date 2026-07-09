@@ -153,17 +153,6 @@
     "availableInMCP": false,
     "errorWorkflow": "f8JebCcUmgk137Li"
   },
-  "staticData": {
-    "global": {
-      "pushed": {
-        "918122187751": 1783590502173,
-        "919000000106": 1783590726591,
-        "919363686316": 1783590738987,
-        "919000000107": 1783591156544,
-        "919000000109": 1783591158702
-      }
-    }
-  },
   "meta": null,
   "pinData": null,
   "versionId": "1bdd2609-81d4-4d8c-9ee2-2b437b5199ac",
