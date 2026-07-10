@@ -277,9 +277,9 @@
         220
       ],
       "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "Bnb4dKAXJwcqzUWj",
-          "name": "Google Sheets account"
+        "googleApi": {
+          "id": "SjmGyVegUeZAEzO7",
+          "name": "Google Sheets (Service Account)"
         }
       },
       "onError": "continueRegularOutput",
@@ -360,9 +360,9 @@
         304
       ],
       "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "Bnb4dKAXJwcqzUWj",
-          "name": "Google Sheets account"
+        "googleApi": {
+          "id": "SjmGyVegUeZAEzO7",
+          "name": "Google Sheets (Service Account)"
         }
       },
       "onError": "continueRegularOutput",
@@ -698,9 +698,9 @@
         460
       ],
       "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "Bnb4dKAXJwcqzUWj",
-          "name": "Google Sheets account"
+        "googleApi": {
+          "id": "SjmGyVegUeZAEzO7",
+          "name": "Google Sheets (Service Account)"
         }
       },
       "onError": "continueRegularOutput",
@@ -743,9 +743,9 @@
         460
       ],
       "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "Bnb4dKAXJwcqzUWj",
-          "name": "Google Sheets account"
+        "googleApi": {
+          "id": "SjmGyVegUeZAEzO7",
+          "name": "Google Sheets (Service Account)"
         }
       },
       "onError": "continueRegularOutput",
@@ -1176,9 +1176,9 @@
         "options": {}
       },
       "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "Bnb4dKAXJwcqzUWj",
-          "name": "Google Sheets account"
+        "googleApi": {
+          "id": "SjmGyVegUeZAEzO7",
+          "name": "Google Sheets (Service Account)"
         }
       },
       "onError": "continueRegularOutput",

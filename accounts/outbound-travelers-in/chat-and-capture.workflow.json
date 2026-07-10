@@ -277,9 +277,9 @@
         220
       ],
       "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "Bnb4dKAXJwcqzUWj",
-          "name": "Google Sheets account"
+        "googleApi": {
+          "id": "SjmGyVegUeZAEzO7",
+          "name": "Google Sheets (Service Account)"
         }
       },
       "onError": "continueRegularOutput",
@@ -361,9 +361,9 @@
         "range": "A:P"
       },
       "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "Bnb4dKAXJwcqzUWj",
-          "name": "Google Sheets account"
+        "googleApi": {
+          "id": "SjmGyVegUeZAEzO7",
+          "name": "Google Sheets (Service Account)"
         }
       },
       "onError": "continueRegularOutput",
@@ -699,9 +699,9 @@
         "options": {}
       },
       "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "Bnb4dKAXJwcqzUWj",
-          "name": "Google Sheets account"
+        "googleApi": {
+          "id": "SjmGyVegUeZAEzO7",
+          "name": "Google Sheets (Service Account)"
         }
       },
       "onError": "continueRegularOutput",
@@ -745,9 +745,9 @@
         "range": "A:P"
       },
       "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "Bnb4dKAXJwcqzUWj",
-          "name": "Google Sheets account"
+        "googleApi": {
+          "id": "SjmGyVegUeZAEzO7",
+          "name": "Google Sheets (Service Account)"
         }
       },
       "onError": "continueRegularOutput",
@@ -1178,9 +1178,9 @@
         "options": {}
       },
       "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "Bnb4dKAXJwcqzUWj",
-          "name": "Google Sheets account"
+        "googleApi": {
+          "id": "SjmGyVegUeZAEzO7",
+          "name": "Google Sheets (Service Account)"
         }
       },
       "onError": "continueRegularOutput",
@@ -1233,7 +1233,7 @@
       ],
       "parameters": {
         "preBuiltAgentsCalloutGoogleSheets": "",
-        "authentication": "oAuth2",
+        "authentication": "serviceAccount",
         "resource": "sheet",
         "operation": "appendOrUpdate",
         "documentId": {
@@ -1404,9 +1404,9 @@
         "options": {}
       },
       "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "Bnb4dKAXJwcqzUWj",
-          "name": "Google Sheets account"
+        "googleApi": {
+          "id": "SjmGyVegUeZAEzO7",
+          "name": "Google Sheets (Service Account)"
         }
       },
       "onError": "continueRegularOutput",
