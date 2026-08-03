@@ -27,3 +27,8 @@ n8n-skills/
 
 # lead PII handoff files - never commit
 CRM-backfill-leads-*.md
+
+# Incident data — customer PII, never commit
+accounts/_backups/*lead*.json
+accounts/_backups/backfill-*.json
+.viral-wf-id

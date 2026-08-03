@@ -1,0 +1,1856 @@
+{
+  "updatedAt": "2026-07-24T08:54:37.935Z",
+  "createdAt": "2025-12-16T09:07:10.149Z",
+  "id": "8yGvAmoeoeT4pI2K",
+  "name": "My workflow",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "32dc212f-995a-4ef2-b56f-ce4200f89574",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -816,
+        288
+      ],
+      "id": "56d471d5-d9c2-445e-a2bd-2194cd56c44d",
+      "name": "Webhook",
+      "webhookId": "32dc212f-995a-4ef2-b56f-ce4200f89574"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ensure IST timezone if you want\nconst d = new Date();\nconst istOffset = 5.5 * 60; // IST = UTC + 5:30\nconst istDate = new Date(d.getTime() + (istOffset + d.getTimezoneOffset())*60000);\n\nconst month = istDate.toLocaleString('en-US', { month: 'long' });\nconst year = istDate.getFullYear();\n\nreturn [{\n  sheetName: `${month} ${year}`\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -560,
+        288
+      ],
+      "id": "20b4f93b-9576-492d-a8f2-064a929c6c12",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U",
+          "mode": "list",
+          "cachedResultName": "Lead manager",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 141363874,
+          "mode": "list",
+          "cachedResultName": "IG Leads 2",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U/edit#gid=141363874"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name": "={{ $('Webhook').item.json.body.name }}",
+            "Destination": "={{ $('Webhook').item.json.body.destination }}",
+            "Travel Type": "={{ $('Webhook').item.json.body.travel_type }}",
+            "Number": "={{ $('Webhook').item.json.body.number }}",
+            "Assignee": "={{ $('Webhook').item.json.body.assignee }}",
+            "Months": "={{ $json.sheetName }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Destination",
+              "displayName": "Destination",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Travel Type",
+              "displayName": "Travel Type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Number",
+              "displayName": "Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Months",
+              "displayName": "Months",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Assignee",
+              "displayName": "Assignee",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {},
+        "authentication": "serviceAccount"
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -96,
+        288
+      ],
+      "id": "4d921474-5872-4c8b-b96b-f221dee6d0ec",
+      "name": "Append row in sheet3",
+      "credentials": {
+        "googleApi": {
+          "id": "SjmGyVegUeZAEzO7",
+          "name": "Google Sheets (Service Account)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Raw input from ManyChat\nconst raw = $json.travel_budget || $json.budget || \"\";\n\n// Normalize string\nlet value = raw\n  .toString()\n  .toLowerCase()\n  .replace(/₹|rs\\.?|inr|,/g, \"\")\n  .trim();\n\nlet number = 0;\n\n// Handle Lakhs (L)\nif (value.includes('l')) {\n  number = parseFloat(value.replace('l', '')) * 100000;\n}\n\n// Handle Thousands (K)\nelse if (value.includes('k')) {\n  number = parseFloat(value.replace('k', '')) * 1000;\n}\n\n// Handle plain numbers\nelse {\n  number = parseFloat(value);\n}\n\n// Safety fallback\nnumber = isNaN(number) ? 0 : Math.round(number);\n\n// Store clean number\nreturn [{\n  json: {\n    ...$json,\n    travel_budget: number\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -352,
+        288
+      ],
+      "id": "6c386855-9882-4156-a75d-4911ba898519",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ensure IST timezone if you want\nconst d = new Date();\nconst istOffset = 5.5 * 60; // IST = UTC + 5:30\nconst istDate = new Date(d.getTime() + (istOffset + d.getTimezoneOffset())*60000);\n\nconst month = istDate.toLocaleString('en-US', { month: 'long' });\nconst year = istDate.getFullYear();\n\nreturn [{\n  sheetName: `${month} ${year}`\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -560,
+        496
+      ],
+      "id": "956cbf2b-fd95-4577-ac73-48ab128e37cb",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U",
+          "mode": "list",
+          "cachedResultName": "Lead manager",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 289592180,
+          "mode": "list",
+          "cachedResultName": "IG Leads 3",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U/edit#gid=289592180"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name": "={{ $('Webhook1').item.json.body.name }}",
+            "Detination": "={{ $('Webhook1').item.json.body.destination }}",
+            "Whatsapp number": "={{ $('Webhook1').item.json.body.contact_number }}",
+            "Number travelers": "={{ $('Webhook1').item.json.body.travelers }}",
+            "Travel duration": "={{ $('Webhook1').item.json.body.travel_duration }}",
+            "Email": "={{ $('Webhook1').item.json.body.email_id }}",
+            "Travel date": "={{ $('Webhook1').item.json.body.travel_date }}",
+            "Lead date": "={{ $('Code in JavaScript2').item.json.sheetName }}",
+            "Budget": "={{ $json.travel_budget }}",
+            "Assignee": "={{ $('Webhook1').item.json.body.assignee }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Whatsapp number",
+              "displayName": "Whatsapp number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Detination",
+              "displayName": "Detination",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Number travelers",
+              "displayName": "Number travelers",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Travel duration",
+              "displayName": "Travel duration",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Budget",
+              "displayName": "Budget",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Travel date",
+              "displayName": "Travel date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Lead date",
+              "displayName": "Lead date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Assignee",
+              "displayName": "Assignee",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {},
+        "authentication": "serviceAccount"
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -96,
+        496
+      ],
+      "id": "e0c71c6e-231e-4bbf-96f7-447461a8fa8c",
+      "name": "Append row in sheet",
+      "credentials": {
+        "googleApi": {
+          "id": "SjmGyVegUeZAEzO7",
+          "name": "Google Sheets (Service Account)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Raw input from ManyChat\nconst raw = $('Webhook1').first().json.body.budget || \"\";\n\n// Normalize string: lowercase, remove symbols/commas/spaces\nlet value = raw\n  .toString()\n  .toLowerCase()\n  .replace(/₹|rs\\.?|inr|,/g, \"\")\n  .trim();\n\nlet number = 0;\n\n// Handle Lakhs (L)\nif (value.includes('l')) {\n  number = parseFloat(value.replace(/l/i, '')) * 100000;\n}\n\n// Handle Thousands (K)\nelse if (value.includes('k')) {\n  number = parseFloat(value.replace(/k/i, '')) * 1000;\n}\n\n// Handle plain numbers\nelse {\n  number = parseFloat(value);\n\n  // If number < 100, assume they meant thousands\n  if (number < 100) {\n    number = number * 1000;\n  }\n}\n\n// Safety fallback\nnumber = isNaN(number) ? 0 : Math.round(number);\n\n// Output only travel_budget\nreturn [{\n  json: {\n    travel_budget: number\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -352,
+        496
+      ],
+      "id": "338e0b81-8feb-483c-ba34-cdc9d74edaac",
+      "name": "Code in JavaScript3"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "adbf15d0-efc5-484a-bc2e-fe052f99035f",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -784,
+        496
+      ],
+      "id": "a10cb4fd-6cec-4838-b094-4aa8c811bfdb",
+      "name": "Webhook1",
+      "webhookId": "adbf15d0-efc5-484a-bc2e-fe052f99035f"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ensure IST timezone if you want\nconst d = new Date();\nconst istOffset = 5.5 * 60; // IST = UTC + 5:30\nconst istDate = new Date(d.getTime() + (istOffset + d.getTimezoneOffset())*60000);\n\nconst month = istDate.toLocaleString('en-US', { month: 'long' });\nconst year = istDate.getFullYear();\n\nreturn [{\n  sheetName: `${month} ${year}`\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -560,
+        736
+      ],
+      "id": "f8e7274c-9e05-4803-8a4b-56de25ddb585",
+      "name": "Code in JavaScript4"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Raw input from ManyChat\nconst raw = $('Webhook2').first().json.body.budget || \"\";\n\n// Normalize string: lowercase, remove symbols/commas/spaces\nlet value = raw\n  .toString()\n  .toLowerCase()\n  .replace(/₹|rs\\.?|inr|,/g, \"\")\n  .trim();\n\nlet number = 0;\n\n// Handle Lakhs (L)\nif (value.includes('l')) {\n  number = parseFloat(value.replace(/l/i, '')) * 100000;\n}\n\n// Handle Thousands (K)\nelse if (value.includes('k')) {\n  number = parseFloat(value.replace(/k/i, '')) * 1000;\n}\n\n// Handle plain numbers\nelse {\n  number = parseFloat(value);\n\n  // If number < 100, assume they meant thousands\n  if (number < 100) {\n    number = number * 1000;\n  }\n}\n\n// Safety fallback\nnumber = isNaN(number) ? 0 : Math.round(number);\n\n// Output only travel_budget\nreturn [{\n  json: {\n    travel_budget: number\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -352,
+        736
+      ],
+      "id": "a1ae8e89-737f-41bb-9bd1-0708146978af",
+      "name": "Code in JavaScript5"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "5d6ecc00-f91b-4452-a06a-b38c3a0e154d",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -784,
+        736
+      ],
+      "id": "7bfc5074-32ef-47c0-8203-67b7a3501a26",
+      "name": "Webhook2",
+      "webhookId": "5d6ecc00-f91b-4452-a06a-b38c3a0e154d"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U",
+          "mode": "list",
+          "cachedResultName": "Lead manager",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1859196145,
+          "mode": "list",
+          "cachedResultName": "IG Leads 4",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U/edit#gid=1859196145"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name": "={{ $('Webhook2').item.json.body.name }}",
+            "Number": "={{ $('Webhook2').item.json.body.contact_number }}",
+            "Destination": "={{ $('Webhook2').item.json.body.destination }}",
+            "Number of travelers": "={{ $('Webhook2').item.json.body.travelers }}",
+            "Budget": "={{ $json.travel_budget }}",
+            "Assignee": "={{ $('Webhook2').item.json.body.assignee }}",
+            "Lead date": "={{ $('Code in JavaScript4').item.json.sheetName }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Number",
+              "displayName": "Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Destination",
+              "displayName": "Destination",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Number of travelers",
+              "displayName": "Number of travelers",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Budget",
+              "displayName": "Budget",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Lead date",
+              "displayName": "Lead date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Assignee",
+              "displayName": "Assignee",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {},
+        "authentication": "serviceAccount"
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -144,
+        736
+      ],
+      "id": "40bcdf2a-be33-44b6-827d-c27dbf6a8a99",
+      "name": "Append row in sheet1",
+      "credentials": {
+        "googleApi": {
+          "id": "SjmGyVegUeZAEzO7",
+          "name": "Google Sheets (Service Account)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Webhook2').item.json.body.assignee }}",
+                    "rightValue": "=Jasmine",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "93d2fee5-0d90-4c33-b354-c82862fd2bad"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Jas"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "9d9951e3-5f1c-4399-b4d4-0ec386db804c",
+                    "leftValue": "={{ $('Webhook2').item.json.body.assignee }}",
+                    "rightValue": "Jensica",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Jen"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        64,
+        736
+      ],
+      "id": "d504a270-9d04-4038-b3bb-e02c035a8a5e",
+      "name": "Switch1"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U",
+          "mode": "list",
+          "cachedResultName": "Lead manager",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1102299434,
+          "mode": "list",
+          "cachedResultName": "Jasmine",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U/edit#gid=1102299434"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name": "={{ $('Webhook2').item.json.body.name }}",
+            "Destination": "={{ $('Webhook2').item.json.body.destination }}",
+            "Number of travelers": "={{ $('Webhook2').item.json.body.travelers }}",
+            "Number": "={{ $('Webhook2').item.json.body.contact_number }}",
+            "Lead date": "={{ $('Code in JavaScript4').item.json.sheetName }}",
+            "Budget": "={{ $('Code in JavaScript5').item.json.travel_budget }}",
+            "Assignee": "={{ $('Webhook2').item.json.body.assignee }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Number",
+              "displayName": "Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Destination",
+              "displayName": "Destination",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Number of travelers",
+              "displayName": "Number of travelers",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Budget",
+              "displayName": "Budget",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Lead date",
+              "displayName": "Lead date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Assignee",
+              "displayName": "Assignee",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {},
+        "authentication": "serviceAccount"
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        272,
+        624
+      ],
+      "id": "aefdaf97-455f-4ecd-a5ab-42015a018b2c",
+      "name": "Append row in sheet4",
+      "credentials": {
+        "googleApi": {
+          "id": "SjmGyVegUeZAEzO7",
+          "name": "Google Sheets (Service Account)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U",
+          "mode": "list",
+          "cachedResultName": "Lead manager",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 84850092,
+          "mode": "list",
+          "cachedResultName": "Jensica",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U/edit#gid=84850092"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name": "={{ $('Webhook2').item.json.body.name }}",
+            "Number": "={{ $('Webhook2').item.json.body.contact_number }}",
+            "Destination": "={{ $('Webhook2').item.json.body.destination }}",
+            "Number of travelers": "={{ $('Webhook2').item.json.body.travelers }}",
+            "Assignee": "={{ $('Webhook2').item.json.body.assignee }}",
+            "Lead date": "={{ $('Code in JavaScript4').item.json.sheetName }}",
+            "Budget": "={{ $('Code in JavaScript5').item.json.travel_budget }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Number",
+              "displayName": "Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Destination",
+              "displayName": "Destination",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Number of travelers",
+              "displayName": "Number of travelers",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Budget",
+              "displayName": "Budget",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Lead date",
+              "displayName": "Lead date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Assignee",
+              "displayName": "Assignee",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {},
+        "authentication": "serviceAccount"
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        272,
+        832
+      ],
+      "id": "c4eea06c-d6a9-45fa-8ef7-edfc8a283727",
+      "name": "Append row in sheet5",
+      "credentials": {
+        "googleApi": {
+          "id": "SjmGyVegUeZAEzO7",
+          "name": "Google Sheets (Service Account)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://admin.workpex.com/form/527c22ad-a7f7-4586-8f72-9024a0ff1eac",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "lead_firstname",
+              "value": "={{ $('Webhook2').item.json.body.name }}"
+            },
+            {
+              "name": "lead_phone",
+              "value": "={{ $json.Number }}"
+            },
+            {
+              "name": "Destination",
+              "value": "={{ $json.Destination }}"
+            },
+            {
+              "name": "Number Of Members",
+              "value": "={{ $json['Number of travelers'] }}"
+            },
+            {
+              "name": "Budget",
+              "value": "={{ $json.Budget }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        480,
+        624
+      ],
+      "id": "b1e50e7f-2cd2-42cf-aa07-3fa19b9542ff",
+      "name": "HTTP Request",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ensure IST timezone if you want\nconst d = new Date();\nconst istOffset = 5.5 * 60; // IST = UTC + 5:30\nconst istDate = new Date(d.getTime() + (istOffset + d.getTimezoneOffset())*60000);\n\nconst month = istDate.toLocaleString('en-US', { month: 'long' });\nconst year = istDate.getFullYear();\n\nreturn [{\n  sheetName: `${month} ${year}`\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -560,
+        1216
+      ],
+      "id": "20cce89f-3021-4668-96a0-0cb72b1e474a",
+      "name": "Code in JavaScript6"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Raw input from ManyChat\nconst raw = $('Webhook3').first().json.body.budget || \"\";\n\n// Normalize string: lowercase, remove symbols/commas/spaces\nlet value = raw\n  .toString()\n  .toLowerCase()\n  .replace(/₹|rs\\.?|inr|,/g, \"\")\n  .trim();\n\nlet number = 0;\n\n// Handle Lakhs (L)\nif (value.includes('l')) {\n  number = parseFloat(value.replace(/l/i, '')) * 100000;\n}\n\n// Handle Thousands (K)\nelse if (value.includes('k')) {\n  number = parseFloat(value.replace(/k/i, '')) * 1000;\n}\n\n// Handle plain numbers\nelse {\n  number = parseFloat(value);\n\n  // If number < 100, assume they meant thousands\n  if (number < 100) {\n    number = number * 1000;\n  }\n}\n\n// Safety fallback\nnumber = isNaN(number) ? 0 : Math.round(number);\n\n// Output only travel_budget\nreturn [{\n  json: {\n    travel_budget: number\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -352,
+        1216
+      ],
+      "id": "262ceaa4-50c0-491d-9edf-0b64cb30a694",
+      "name": "Code in JavaScript7"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "5d6ecc00-f91b-4452-a06a-b38c3a0e154d",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -784,
+        1216
+      ],
+      "id": "c3a86761-b75e-4b42-a6c4-fa215f871216",
+      "name": "Webhook3",
+      "webhookId": "5d6ecc00-f91b-4452-a06a-b38c3a0e154d"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U",
+          "mode": "list",
+          "cachedResultName": "Lead manager",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 733978535,
+          "mode": "list",
+          "cachedResultName": "New IG Leads 6",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U/edit#gid=733978535"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name ": "={{ $('Webhook3').item.json.body.name }}",
+            "Destination": "={{ $('Webhook3').item.json.body.destination }}",
+            "Travel date": "={{ $('Webhook3').item.json.body.travel_date }}",
+            "Number": "={{ $('Webhook3').item.json.body.contact_number }}",
+            "Lead date": "={{ $('Code in JavaScript6').item.json.sheetName }}",
+            "Assignee": "={{ $('Webhook3').item.json.body.assignee }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Name ",
+              "displayName": "Name ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Destination",
+              "displayName": "Destination",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Travel date",
+              "displayName": "Travel date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Number",
+              "displayName": "Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Lead date",
+              "displayName": "Lead date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Assignee",
+              "displayName": "Assignee",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {},
+        "authentication": "serviceAccount"
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -144,
+        1216
+      ],
+      "id": "4e46c927-745f-405e-9c02-621801504795",
+      "name": "Append row in sheet2",
+      "credentials": {
+        "googleApi": {
+          "id": "SjmGyVegUeZAEzO7",
+          "name": "Google Sheets (Service Account)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Webhook3').item.json.body.assignee }}",
+                    "rightValue": "=Jasmine",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "93d2fee5-0d90-4c33-b354-c82862fd2bad"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Jas"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "9d9951e3-5f1c-4399-b4d4-0ec386db804c",
+                    "leftValue": "={{ $('Webhook3').item.json.body.assignee }}",
+                    "rightValue": "Jensica",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Jen"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        64,
+        1216
+      ],
+      "id": "43160c6e-d84f-4e63-b9fb-ce45a70cd44e",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U",
+          "mode": "list",
+          "cachedResultName": "Lead manager",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 41015566,
+          "mode": "list",
+          "cachedResultName": "Jasmine 2.1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U/edit#gid=41015566"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name ": "={{ $('Webhook3').item.json.body.name }}",
+            "Destination": "={{ $('Webhook3').item.json.body.destination }}",
+            "Lead date": "={{ $('Code in JavaScript6').item.json.sheetName }}",
+            "Number": "={{ $('Webhook3').item.json.body.contact_number }}",
+            "Assignee": "={{ $('Webhook3').item.json.body.assignee }}",
+            "crm_result": "={{ $('Webhook3').item.json.executionMode }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Name ",
+              "displayName": "Name ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Destination",
+              "displayName": "Destination",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Number",
+              "displayName": "Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Lead date",
+              "displayName": "Lead date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Assignee",
+              "displayName": "Assignee",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "crm_result",
+              "displayName": "crm_result",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {},
+        "authentication": "serviceAccount"
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        272,
+        1104
+      ],
+      "id": "e324f0fe-98bf-489a-a704-05aea5625cc5",
+      "name": "Append row in sheet6",
+      "credentials": {
+        "googleApi": {
+          "id": "SjmGyVegUeZAEzO7",
+          "name": "Google Sheets (Service Account)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U",
+          "mode": "list",
+          "cachedResultName": "Lead manager",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 709648355,
+          "mode": "list",
+          "cachedResultName": "Jensica 2.1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U/edit#gid=709648355"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Lead date": "={{ $('Code in JavaScript6').item.json.sheetName }}",
+            "Destination": "={{ $('Webhook3').item.json.body.destination }}",
+            "Number": "={{ $('Webhook3').item.json.body.contact_number }}",
+            "Assignee": "={{ $('Webhook3').item.json.body.assignee }}",
+            "crm_result": "={{ $('Webhook3').item.json.executionMode }}",
+            "Name ": "={{ $('Webhook3').item.json.body.name }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Name ",
+              "displayName": "Name ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Destination",
+              "displayName": "Destination",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Number",
+              "displayName": "Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Lead date",
+              "displayName": "Lead date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Assignee",
+              "displayName": "Assignee",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "crm_result",
+              "displayName": "crm_result",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {},
+        "authentication": "serviceAccount"
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        272,
+        1312
+      ],
+      "id": "61995896-1cba-465c-a143-ba3b1e8d9238",
+      "name": "Append row in sheet7",
+      "credentials": {
+        "googleApi": {
+          "id": "SjmGyVegUeZAEzO7",
+          "name": "Google Sheets (Service Account)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://app.workpex.com/form/527c22ad-a7f7-4586-8f72-9024a0ff1eac",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "lead_firstname",
+              "value": "={{ $json['Name '] }}"
+            },
+            {
+              "name": "lead_phone",
+              "value": "={{ $json.Number }}"
+            },
+            {
+              "name": "destination",
+              "value": "={{ $json.Destination }}"
+            },
+            {
+              "name": "Number Of Members",
+              "value": "={{ $json['Number of travelers'] }}"
+            },
+            {
+              "name": "Budget",
+              "value": "={{ $('Code in JavaScript7').item.json.travel_budget }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        480,
+        1104
+      ],
+      "id": "3cb349d8-9f2c-425e-b66f-1b770e441b85",
+      "name": "HTTP Request1",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "85ce2e06-ddbe-4172-a95a-d8449c3c8b56",
+      "name": "Send to Custom CRM (main page)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        696,
+        1104
+      ],
+      "disabled": false,
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "parameters": {
+        "method": "POST",
+        "url": "https://app.187-127-191-151.sslip.io/tms/api/ingest",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => { const b = $('Webhook3').item.json.body || {}; const cl = v => { v = (v == null ? '' : String(v)).trim(); return /\\{\\{.*\\}\\}/.test(v) ? '' : v; }; let phone = cl(b.contact_number).replace(/\\D/g, ''); if (phone.startsWith('00')) phone = phone.slice(2); const trav = (cl(b.travelers).match(/\\d+/) || [''])[0]; let budget = 0; try { budget = $('Code in JavaScript7').item.json.travel_budget || 0; } catch (e) {} return { source: 'instagram_main', name: cl(b.name), phone: phone, destination: cl(b.destination), travelers: trav, budget: budget, travel_date: cl(b.travel_date), quick_assistance: '', notes: 'Lead via ManyChat main-page flow (assignee: ' + cl(b.assignee) + ')' }; })() }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "gI20n2XCpu3GzUFZ",
+          "name": "Custom CRM Ingest Key (X-Api-Key)"
+        }
+      }
+    },
+    {
+      "id": "fd256f58-7a8e-48e0-ad5d-9b314775d970",
+      "name": "Return Workpex response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        912,
+        1104
+      ],
+      "disabled": false,
+      "parameters": {
+        "jsCode": "// Webhook3 uses responseMode=lastNode: keep the body ManyChat receives\n// identical to today's (the Workpex response), not the CRM response.\nreturn [{ json: $('HTTP Request1').first().json }];"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript3": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript4": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript5": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook2": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in sheet1": {
+      "main": [
+        [
+          {
+            "node": "Switch1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch1": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet4",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Append row in sheet5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in sheet4": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in sheet5": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript6": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript7",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript7": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook3": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript6",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in sheet2": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet6",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Append row in sheet7",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in sheet6": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in sheet7": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Send to Custom CRM (main page)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send to Custom CRM (main page)": {
+      "main": [
+        [
+          {
+            "node": "Return Workpex response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {
+    "Webhook": [
+      {
+        "json": {
+          "headers": {
+            "host": "n8n.srv1159219.hstgr.cloud",
+            "user-agent": "ManyChat",
+            "content-length": "133",
+            "content-type": "application/json; charset=utf-8",
+            "x-forwarded-for": "3.67.137.87",
+            "x-forwarded-host": "n8n.srv1159219.hstgr.cloud",
+            "x-forwarded-port": "443",
+            "x-forwarded-proto": "https",
+            "x-forwarded-server": "fdf851bca080",
+            "x-real-ip": "3.67.137.87",
+            "accept-encoding": "gzip"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "name": "paru_vasan",
+            "destination": "Andaman",
+            "travel_type": "COUPLES",
+            "number": "7200252291",
+            "assignee": "Jensica"
+          },
+          "webhookUrl": "https://n8n.srv1159219.hstgr.cloud/webhook/32dc212f-995a-4ef2-b56f-ce4200f89574",
+          "executionMode": "production"
+        }
+      }
+    ],
+    "Webhook1": [
+      {
+        "json": {
+          "headers": {
+            "host": "n8n.srv1159219.hstgr.cloud",
+            "user-agent": "ManyChat",
+            "content-length": "211",
+            "content-type": "application/json; charset=utf-8",
+            "x-forwarded-for": "3.120.224.17",
+            "x-forwarded-host": "n8n.srv1159219.hstgr.cloud",
+            "x-forwarded-port": "443",
+            "x-forwarded-proto": "https",
+            "x-forwarded-server": "fdf851bca080",
+            "x-real-ip": "3.120.224.17",
+            "accept-encoding": "gzip"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "name": "Arsath",
+            "destination": "Andaman",
+            "travelers": "2",
+            "contact_number": "9894672665",
+            "travel_date": "May",
+            "travel_duration": "10",
+            "budget": "20",
+            "email_id": "arzathmusa@gmail.com"
+          },
+          "webhookUrl": "https://n8n.srv1159219.hstgr.cloud/webhook-test/adbf15d0-efc5-484a-bc2e-fe052f99035f",
+          "executionMode": "test"
+        }
+      }
+    ],
+    "Code in JavaScript2": [
+      {
+        "json": {
+          "sheetName": "January 2026"
+        }
+      }
+    ],
+    "Code in JavaScript3": [
+      {
+        "json": {
+          "travel_budget": 20000
+        }
+      }
+    ],
+    "Webhook2": [
+      {
+        "json": {
+          "headers": {
+            "host": "n8n.srv1159219.hstgr.cloud",
+            "user-agent": "ManyChat",
+            "content-length": "172",
+            "content-type": "application/json; charset=utf-8",
+            "x-forwarded-for": "35.158.214.255",
+            "x-forwarded-host": "n8n.srv1159219.hstgr.cloud",
+            "x-forwarded-port": "443",
+            "x-forwarded-proto": "https",
+            "x-forwarded-server": "fdf851bca080",
+            "x-real-ip": "35.158.214.255",
+            "accept-encoding": "gzip"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "name": "Mohammed Hakkim",
+            "destination": "Kashmir",
+            "travelers": "{{cuf_14209642}}",
+            "contact_number": "9344195896",
+            "budget": "20k",
+            "assignee": "Jasmine"
+          },
+          "webhookUrl": "https://n8n.srv1159219.hstgr.cloud/webhook-test/5d6ecc00-f91b-4452-a06a-b38c3a0e154d",
+          "executionMode": "test"
+        }
+      }
+    ],
+    "Code in JavaScript4": [
+      {
+        "json": {
+          "sheetName": "February 2026"
+        }
+      }
+    ],
+    "Code in JavaScript5": [
+      {
+        "json": {
+          "travel_budget": 20000
+        }
+      }
+    ],
+    "Code in JavaScript6": [
+      {
+        "json": {
+          "sheetName": "February 2026"
+        }
+      }
+    ],
+    "Code in JavaScript7": [
+      {
+        "json": {
+          "travel_budget": 20000
+        }
+      }
+    ],
+    "Webhook3": [
+      {
+        "json": {
+          "headers": {
+            "host": "n8n.srv1159219.hstgr.cloud",
+            "user-agent": "ManyChat",
+            "content-length": "172",
+            "content-type": "application/json; charset=utf-8",
+            "x-forwarded-for": "35.158.214.255",
+            "x-forwarded-host": "n8n.srv1159219.hstgr.cloud",
+            "x-forwarded-port": "443",
+            "x-forwarded-proto": "https",
+            "x-forwarded-server": "fdf851bca080",
+            "x-real-ip": "35.158.214.255",
+            "accept-encoding": "gzip"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "name": "Mohammed Hakkim",
+            "destination": "Kashmir",
+            "travelers": "{{cuf_14209642}}",
+            "contact_number": "9344195896",
+            "budget": "20k",
+            "assignee": "Jasmine"
+          },
+          "webhookUrl": "https://n8n.srv1159219.hstgr.cloud/webhook-test/5d6ecc00-f91b-4452-a06a-b38c3a0e154d",
+          "executionMode": "test"
+        }
+      }
+    ]
+  },
+  "versionId": "53ae7e50-9955-4f04-be1c-d51b188a48a5",
+  "versionCounter": 97,
+  "triggerCount": 4,
+  "shared": [
+    {
+      "updatedAt": "2025-12-16T09:07:10.164Z",
+      "createdAt": "2025-12-16T09:07:10.164Z",
+      "role": "workflow:owner",
+      "workflowId": "8yGvAmoeoeT4pI2K",
+      "projectId": "rB3QZRABO7nl17PH",
+      "project": {
+        "updatedAt": "2025-11-28T05:56:18.467Z",
+        "createdAt": "2025-11-28T05:42:25.923Z",
+        "id": "rB3QZRABO7nl17PH",
+        "name": "Outbound Travelers <outboundtravelers1@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "projectRelations": [
+          {
+            "updatedAt": "2025-11-28T05:42:25.924Z",
+            "createdAt": "2025-11-28T05:42:25.924Z",
+            "userId": "1f2bd6c5-af4f-4a36-8846-17c36547f8ac",
+            "projectId": "rB3QZRABO7nl17PH",
+            "user": {
+              "updatedAt": "2026-08-03T04:13:29.000Z",
+              "createdAt": "2025-11-28T05:42:24.767Z",
+              "id": "1f2bd6c5-af4f-4a36-8846-17c36547f8ac",
+              "email": "outboundtravelers1@gmail.com",
+              "firstName": "Outbound",
+              "lastName": "Travelers",
+              "personalizationAnswers": {
+                "version": "v4",
+                "personalization_survey_submitted_at": "2025-11-28T06:02:15.741Z",
+                "personalization_survey_n8n_version": "1.121.3",
+                "companyIndustryExtended": [
+                  "other"
+                ],
+                "otherCompanyIndustryExtended": "Travel and Tourism",
+                "companySize": "<20",
+                "companyType": "other",
+                "automationGoalSm": [
+                  "lead-generation"
+                ],
+                "role": "sales-and-marketing",
+                "reportedSource": "youtube"
+              },
+              "settings": {
+                "userActivated": true,
+                "firstSuccessfulWorkflowId": "8yGvAmoeoeT4pI2K",
+                "userActivatedAt": 1765879592923,
+                "npsSurvey": {
+                  "waitingForResponse": true,
+                  "ignoredCount": 1,
+                  "lastShownAt": 1782362054742
+                },
+                "easyAIWorkflowOnboarded": true
+              },
+              "disabled": false,
+              "mfaEnabled": false,
+              "lastActiveAt": "2026-08-02",
+              "isPending": false
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "tags": []
+}

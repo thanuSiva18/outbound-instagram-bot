@@ -10,19 +10,34 @@ If either side changes a field name, auth, or dedup rule — update this doc fir
 ---
 
 ## Endpoint
+
+> ⚠️ **Corrected 2026-08-03.** The Vercel URL below is **dead** and the `/api/webhooks/{source}`
+> route is explicitly *not for bots* — it always returns 200 and silently swallows failures.
+> Use `/tms/api/ingest`, which returns honest status codes. Source of truth:
+> `Outbound-Full/LEAD_INGEST_API.md`.
+
 ```
-POST https://outbound-full.vercel.app/tms/api/webhooks/instagram
+POST https://187-127-191-151.sslip.io/tms/api/ingest
 Content-Type: application/json
+X-Api-Key: <bot key>
 ```
-- The `instagram` path segment becomes the lead's `source` in the CRM.
-- Prefer the vercel URL (don't use the direct sslip.io VPS host).
+
+- ❌ `https://outbound-full.vercel.app/tms/api/webhooks/instagram` — dead (old Vercel host)
+- ❌ `https://app.187-127-191-151.sslip.io/...` — **no `app.` prefix.** That subdomain has no
+  nginx vhost; it falls through to the website backend (wrong TLS cert → n8n "SSL Issue",
+  and 404 on `/tms/*`). This caused the 1–3 Aug 2026 outage.
+- ✅ `https://app.outboundtravelers.com/tms/api/ingest` — stable alternative, Cloudflare-proxied,
+  survives a VPS IP change. Preferred once verified under production load.
+- `source` is a **hard enum**: `whatsapp` · `instagram_in` · `instagram_main` · `facebook` ·
+  `website`. Anything else → **422**. It is NOT taken from the URL path.
+- `?test=1` validates and echoes without persisting — use it to dry-run from n8n.
 
 ## Auth
-- **Today:** none (server secret unset → signature check skipped).
-- **To secure (recommended, do before go-live):** server sets `META_APP_SECRET`,
-  bot signs the **raw JSON body** and sends:
-  `X-Hub-Signature-256: sha256=<hex HMAC-SHA256(rawBody, secret)>`.
-  Compute the HMAC in a Code node before the HTTP Request node. Secret shared out-of-band.
+- Header **`X-Api-Key: <bot key>`**, checked against server env `LEAD_INGEST_API_KEY`.
+- Fail-closed: env unset → **503**. Missing/wrong key → **401**.
+- In n8n this is credential **"Custom CRM Ingest Key (X-Api-Key)"** (`gI20n2XCpu3GzUFZ`).
+- The old `META_APP_SECRET` / `X-Hub-Signature-256` HMAC scheme applies only to the legacy
+  Meta-style webhook route, not to `/tms/api/ingest`.
 
 ## When we push
 For the **Rahul scripted `.in` flow**, we push on the **Yes** quick-assistance button click.
