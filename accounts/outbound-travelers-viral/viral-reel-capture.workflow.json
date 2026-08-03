@@ -1,0 +1,568 @@
+{
+  "name": "Outbound.in — Viral Reel Capture (comment→DM)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "viral-lead-in",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -380,
+        0
+      ],
+      "id": "a1000000-0000-4000-8000-000000000001",
+      "name": "Webhook — viral lead",
+      "webhookId": "b7e4c1a2-9f3d-4e58-8c1a-2d6f0b9e5a71"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -160,
+        0
+      ],
+      "id": "a1000000-0000-4000-8000-000000000002",
+      "name": "Respond OK"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize one ManyChat viral-flow message into a single clean lead object.\n// ManyChat sends the literal merge tag (e.g. \"{{cuf_viral_email}}\") when a field is\n// still empty, so those must be scrubbed or they land in the sheet as junk.\nconst b = $('Webhook — viral lead').first().json.body || {};\n\nconst clean = (v) => {\n  v = (v == null ? '' : String(v)).trim();\n  if (/\\{\\{.*\\}\\}/.test(v)) return '';\n  if (/^(null|undefined)$/i.test(v)) return '';\n  return v;\n};\n\nconst ig_user_id = clean(b.ig_user_id);\nif (!ig_user_id) {\n  throw new Error('ig_user_id missing — cannot key the sheet row');\n}\n\nconst destination = clean(b.destination);\nconst travel_date = clean(b.travel_date);\nconst email = clean(b.email);\nconst contact_number = clean(b.contact_number);\n\n// pax: \"4 people\" -> \"4\"\nconst travelers = (clean(b.travelers).match(/\\d+/) || [''])[0];\n\n// phone: digits only, strip a leading 00 international prefix\nlet phone_digits = contact_number.replace(/\\D/g, '');\nif (phone_digits.startsWith('00')) phone_digits = phone_digits.slice(2);\nconst phone_valid = phone_digits.length >= 10;\n\n// Assignee must match the sheet values exactly — normalize casing/spelling drift\nconst a = clean(b.assignee);\nconst assignee = /^jasmine$/i.test(a) ? 'Jasmine'\n  : /^jen?s?n?ica$/i.test(a) ? 'Jensica'\n  : a;\n\nconst complete = Boolean(destination && travel_date && travelers && email && phone_valid);\nconst any_field = Boolean(destination || travel_date || travelers || email || contact_number);\nconst status = complete ? 'qualified' : (any_field ? 'in_progress' : 'new');\n\n// Lead date — IST \"Month YYYY\", identical format to the existing flows\nconst d = new Date();\nconst ist = new Date(d.getTime() + (5.5 * 60 + d.getTimezoneOffset()) * 60000);\nconst lead_date = `${ist.toLocaleString('en-US', { month: 'long' })} ${ist.getFullYear()}`;\n\nreturn [{\n  json: {\n    ig_user_id,\n    ig_username: clean(b.ig_username),\n    name: clean(b.name),\n    destination,\n    travel_date,\n    travelers,\n    email,\n    contact_number,\n    phone_digits,\n    assignee,\n    status,\n    complete,\n    lead_date,\n    step: clean(b.step)\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        60,
+        0
+      ],
+      "id": "a1000000-0000-4000-8000-000000000003",
+      "name": "Normalize"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U",
+          "mode": "list",
+          "cachedResultName": "Lead manager",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1635965080,
+          "mode": "list",
+          "cachedResultName": "New viral leads 1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U/edit#gid=1635965080"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "ig_user_id",
+              "lookupValue": "={{ $json.ig_user_id }}"
+            }
+          ]
+        },
+        "authentication": "serviceAccount",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        280,
+        0
+      ],
+      "id": "a1000000-0000-4000-8000-000000000004",
+      "name": "Lookup existing row",
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleApi": {
+          "id": "SjmGyVegUeZAEzO7",
+          "name": "Google Sheets (Service Account)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Preserve the ORIGINAL \"Lead date\" across progressive writes.\n// Append-or-Update overwrites every mapped column, so without this a lead that\n// spans a month boundary would silently have its capture month rewritten.\nconst lead = $('Normalize').first().json;\n\nconst existing = $input.all()\n  .map((i) => i.json)\n  .find((r) => r && String(r.ig_user_id || '') === String(lead.ig_user_id));\n\nconst original = existing ? String(existing['Lead date'] || '').trim() : '';\n\nreturn [{\n  json: {\n    ...lead,\n    lead_date: original || lead.lead_date,\n    is_new_row: !existing\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        0
+      ],
+      "id": "a1000000-0000-4000-8000-000000000005",
+      "name": "Preserve first values"
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U",
+          "mode": "list",
+          "cachedResultName": "Lead manager",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1635965080,
+          "mode": "list",
+          "cachedResultName": "New viral leads 1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U/edit#gid=1635965080"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name ": "={{ $json.name }}",
+            "Destination": "={{ $json.destination }}",
+            "Travel date": "={{ $json.travel_date }}",
+            "Number of Travelers": "={{ $json.travelers }}",
+            "Mail id": "={{ $json.email }}",
+            "Number": "={{ $json.contact_number }}",
+            "Lead date": "={{ $json.lead_date }}",
+            "Assignee": "={{ $json.assignee }}",
+            "ig_user_id": "={{ $json.ig_user_id }}",
+            "status": "={{ $json.status }}"
+          },
+          "matchingColumns": [
+            "ig_user_id"
+          ],
+          "schema": [
+            {
+              "id": "Name ",
+              "displayName": "Name ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Destination",
+              "displayName": "Destination",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Travel date",
+              "displayName": "Travel date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Number of Travelers",
+              "displayName": "Number of Travelers",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Mail id",
+              "displayName": "Mail id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Number",
+              "displayName": "Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Lead date",
+              "displayName": "Lead date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Assignee",
+              "displayName": "Assignee",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "crm_result",
+              "displayName": "crm_result",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ig_user_id",
+              "displayName": "ig_user_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {},
+        "authentication": "serviceAccount"
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        720,
+        0
+      ],
+      "id": "a1000000-0000-4000-8000-000000000006",
+      "name": "Save lead",
+      "credentials": {
+        "googleApi": {
+          "id": "SjmGyVegUeZAEzO7",
+          "name": "Google Sheets (Service Account)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1000000-0000-4000-8000-000000000001",
+              "leftValue": "={{ $('Preserve first values').item.json.complete }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        940,
+        0
+      ],
+      "id": "a1000000-0000-4000-8000-000000000007",
+      "name": "All 5 answers in?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://app.187-127-191-151.sslip.io/tms/api/ingest",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => { const l = $('Preserve first values').item.json; return { source: 'instagram_in', name: l.name, ig_username: l.ig_username, ig_user_id: l.ig_user_id, phone: l.phone_digits, destination: l.destination, travel_date: l.travel_date, travelers: l.travelers, email: l.email, campaign: 'viral-reel', notes: 'Viral reel lead (IG comment to DM automation). Destination: ' + (l.destination || '-') + ' | Travel: ' + (l.travel_date || '-') + ' | Pax: ' + (l.travelers || '-') + ' | Email: ' + (l.email || '-') + ' | Assigned to ' + (l.assignee || '-') + '.' }; })() }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1160,
+        -100
+      ],
+      "id": "a1000000-0000-4000-8000-000000000008",
+      "name": "Push to CRM",
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "gI20n2XCpu3GzUFZ",
+          "name": "Custom CRM Ingest Key (X-Api-Key)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U",
+          "mode": "list",
+          "cachedResultName": "Lead manager",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1635965080,
+          "mode": "list",
+          "cachedResultName": "New viral leads 1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U/edit#gid=1635965080"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ig_user_id": "={{ $('Preserve first values').item.json.ig_user_id }}",
+            "crm_result": "={{ (() => { const r = $json || {}; if (r.ok && r.id) return (r.created ? 'created ' : 'deduped ') + r.id; if (r.error) return 'ERROR: ' + String(r.error).slice(0, 120); return 'ERROR: ' + JSON.stringify(r).slice(0, 120); })() }}"
+          },
+          "matchingColumns": [
+            "ig_user_id"
+          ],
+          "schema": [
+            {
+              "id": "Name ",
+              "displayName": "Name ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Destination",
+              "displayName": "Destination",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Travel date",
+              "displayName": "Travel date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Number of Travelers",
+              "displayName": "Number of Travelers",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Mail id",
+              "displayName": "Mail id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Number",
+              "displayName": "Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Lead date",
+              "displayName": "Lead date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Assignee",
+              "displayName": "Assignee",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "crm_result",
+              "displayName": "crm_result",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ig_user_id",
+              "displayName": "ig_user_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {},
+        "authentication": "serviceAccount"
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1380,
+        -100
+      ],
+      "id": "a1000000-0000-4000-8000-000000000009",
+      "name": "Write crm_result",
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "googleApi": {
+          "id": "SjmGyVegUeZAEzO7",
+          "name": "Google Sheets (Service Account)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook — viral lead": {
+      "main": [
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond OK": {
+      "main": [
+        [
+          {
+            "node": "Normalize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize": {
+      "main": [
+        [
+          {
+            "node": "Lookup existing row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup existing row": {
+      "main": [
+        [
+          {
+            "node": "Preserve first values",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preserve first values": {
+      "main": [
+        [
+          {
+            "node": "Save lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save lead": {
+      "main": [
+        [
+          {
+            "node": "All 5 answers in?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "All 5 answers in?": {
+      "main": [
+        [
+          {
+            "node": "Push to CRM",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Push to CRM": {
+      "main": [
+        [
+          {
+            "node": "Write crm_result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "f8JebCcUmgk137Li"
+  }
+}
