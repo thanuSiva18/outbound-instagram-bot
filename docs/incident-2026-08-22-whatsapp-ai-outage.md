@@ -8,6 +8,8 @@ no error count and no alert ever showed a problem. **248 unique leads** need a c
 |---|---|
 | Started | 2026-08-22 16:54 IST (11:24:57 UTC) |
 | Detected | 2026-08-24 ~12:00 IST (a human noticed, not an alert) |
+| **Resolved** | **2026-08-24 09:08:02 UTC / 14:38 IST** (credits added to OB-3) |
+| **Total duration** | **45h 43m** |
 | Cause | OpenAI account out of credits — but see "why it went unnoticed" |
 | AI turns attempted / failed | 441 / 441 (100%) |
 | Distinct leads affected | 248 (216 never reached the CRM, 244 never qualified) |
@@ -16,6 +18,15 @@ no error count and no alert ever showed a problem. **248 unique leads** need a c
 Last healthy AI reply: execution `260686`, 2026-08-22 11:21:48 UTC.
 First failed AI reply: execution `260696`, 2026-08-22 11:24:57 UTC.
 Clean cutover with no intermittency — the signature of a hard billing cutoff.
+
+Recovery was equally clean: last failure 09:05:35 UTC, first healthy turn 09:08:02 UTC
+(`"manali"` → `"Manali sounds wonderful! 🏔️"` with `destination` captured again). No
+redeploy and no workflow change were needed, which confirms the diagnosis: the only thing
+ever wrong was the account balance behind credential `XhT24Tqns6iamHur`.
+
+The first fix attempt failed because credits were added to a different OpenAI account.
+There are three OpenAI credentials in this n8n and their dashboards look identical; always
+confirm the organisation/project that issued the key stored in **OB-3**.
 
 ## Root cause
 
