@@ -5,7 +5,11 @@ Do these in order. Step 1 gates everything else.
 
 ---
 
-## Step 1 — Restore the bot (only you can do this)
+## Step 1 — Restore the bot ✅ DONE 2026-08-24 09:08:02 UTC
+
+Credits landed on OB-3. First healthy AI turn 09:08:02 UTC / 14:38 IST
+(`"manali"` → `"Manali sounds wonderful! 🏔️"`, with `destination` captured again).
+Total outage **45h 43m**. The rest of this step is kept for reference if it recurs.
 
 **Nothing else works until this is done.** The bot has been answering every customer with
 *"Thanks so much for messaging Outbound Travellers! 😊 Our team will get back to you very
@@ -46,18 +50,20 @@ No redeploy, no workflow edit, no restart. Recovery is immediate once the accoun
 the AI is still dead they hit the same canned line a second time.
 
 Workflow: **`Outbound — WhatsApp Lead Recovery Sender (2026-08-22 incident)`**
-(id `T8rWkmCjOD2yE9Mw`). Created **inactive** with `DRY_RUN = true`.
+(id `T8rWkmCjOD2yE9Mw`).
+
+**Current state — primed and safe.** Active, `DRY_RUN = true`,
+`SKIP_IF_INBOUND_AFTER = 2026-08-24T09:08:00Z`, 272 leads loaded. It runs once a minute and
+logs the lead it *would* message. **Nothing has been sent** — verified: executions take the
+`Dry run (nothing sent)` branch and the Send node has never run.
 
 Preview of every message is at
 `_incident-2026-08-22-whatsapp-ai-outage-DATA-DO-NOT-COMMIT/DRY-RUN-messages.txt`.
 
-1. Open `Pick next lead` and set `SKIP_IF_INBOUND_AFTER` to the UTC time you fixed Step 1
-   (e.g. `2026-08-24T10:00:00Z`). Anyone who has spoken to the working bot since then is
-   already handled and does not need an apology.
-2. Activate the workflow with `DRY_RUN = true`. It runs once a minute, picks the next lead
-   and logs what it *would* send. Read one execution.
-3. Set `DRY_RUN = false`, save, leave it Active. It sends one message per minute.
-4. It stops on its own when the queue empties. Deactivate any time; progress is kept.
+**To go live, one change:** open `Pick next lead`, change `const DRY_RUN = true;` to
+`const DRY_RUN = false;`, Save. Sending begins within a minute, one message per minute.
+
+It stops on its own when the queue empties. Deactivate any time; progress is kept.
 
 Built-in safety, all verified before handover:
 
