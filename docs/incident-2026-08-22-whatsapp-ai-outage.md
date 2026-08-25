@@ -114,7 +114,7 @@ minute — no redeploy, no workflow change.
 mundane and the blindness was not. A credit top-up fixes today. It does nothing about the
 next `continueRegularOutput` that hides the next failure.
 
-Migration `0042_ops_automation_log.sql` plus `server/src/ops/*` in `Outbound-Full` add:
+Migration `0060_ops_automation_log.sql` plus `server/src/ops/*` in `Outbound-Full` add:
 
 - `ops.automation_runs` — one slim row per execution, with **our own verdict** alongside
   n8n's: `health` is `ok` / `degraded` / `failed`, where `degraded` means "n8n said success

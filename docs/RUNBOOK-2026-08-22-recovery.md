@@ -44,26 +44,39 @@ No redeploy, no workflow edit, no restart. Recovery is immediate once the accoun
 
 ---
 
-## Step 2 — Message the leads that were lost
-
-**Do not start this before Step 1 is verified.** Every lead you message will reply, and if
-the AI is still dead they hit the same canned line a second time.
+## Step 2 — Message the leads that were lost ✅ DONE 2026-08-24
 
 Workflow: **`Outbound — WhatsApp Lead Recovery Sender (2026-08-22 incident)`**
-(id `T8rWkmCjOD2yE9Mw`).
+(id `T8rWkmCjOD2yE9Mw`). Ran 15:19 → 17:52 IST, then **deactivated** once the queue drained.
 
-**Current state — primed and safe.** Active, `DRY_RUN = true`,
-`SKIP_IF_INBOUND_AFTER = 2026-08-24T09:08:00Z`, 272 leads loaded. It runs once a minute and
-logs the lead it *would* message. **Nothing has been sent** — verified: executions take the
-`Dry run (nothing sent)` branch and the Send node has never run.
+| Result | |
+|---|---|
+| Messages sent | **154** (154 distinct numbers — no one messaged twice) |
+| Send failures | **0** |
+| Replied to the apology | **50 (32.5%)** |
+| Reached `qualified` | **36** |
+| Pushed to the CRM | **44** |
+| Named a destination | 41 — Kashmir (6), Andaman (4), Vietnam (3), Bali, Manali, Thailand, Kerala, Munnar |
+| Unhealthy turns since | 0 |
 
-Preview of every message is at
-`_incident-2026-08-22-whatsapp-ai-outage-DATA-DO-NOT-COMMIT/DRY-RUN-messages.txt`.
+So 44 leads that were dead for 45 hours are now in the CRM. Two leads aged out of the 24h
+window before their turn; everyone else in the queue was reached.
 
-**To go live, one change:** open `Pick next lead`, change `const DRY_RUN = true;` to
-`const DRY_RUN = false;`, Save. Sending begins within a minute, one message per minute.
+To reuse this for a future incident: rebuild `TARGETS` in `Pick next lead`, set
+`SKIP_IF_INBOUND_AFTER` to the recovery time, run once with `DRY_RUN = true` and read an
+execution, then set it to `false` and Activate. Deactivate when the queue drains — it does
+not stop itself, and an idle Active workflow burns ~1,440 pointless executions a day.
 
-It stops on its own when the queue empties. Deactivate any time; progress is kept.
+Built-in safety, all verified in production:
+
+| Guard | Behaviour |
+|---|---|
+| Rate | one message per minute (`MAX_PER_RUN`) |
+| 24h window | re-checked at send time; expired leads skipped, never sent |
+| Quiet hours | nothing before 9am or after 9pm IST |
+| Duplicate protection | ledger keyed by number; survives stop/start |
+| **Auto-pause** | **3 consecutive Meta rejections and it stops itself** |
+| Failures | recorded with Meta's reason, never blindly retried |
 
 Built-in safety, all verified before handover:
 
@@ -76,21 +89,22 @@ Built-in safety, all verified before handover:
 | **Auto-pause** | **3 consecutive Meta rejections and it stops itself** |
 | Failures | recorded with Meta's reason, never blindly retried |
 
-⚠️ `919488108394` (Thanu siva N) is in the target list — you will message yourself.
-Harmless, and a useful live test. Remove it from `TARGETS` in `Pick next lead` if you'd
-rather not.
+**The 24h window is why speed matters.** WhatsApp only allows free-form messages within 24
+hours of the customer's last message, and the pool drained at roughly 7–10 leads per hour
+while we waited. Because the queue happened to be ordered oldest-first, the leads closest to
+expiry went first and only 2 were lost to it.
 
-**The eligible list decays.** WhatsApp only allows free-form messages within 24 hours of the
-customer's last message. At handover: 160 eligible, 104 already expired, and roughly 7–10
-leave the eligible pool per hour. The 104 expired leads are in `affected-leads.csv` and can
-only be reached by phone or an approved WhatsApp template.
+**113 leads expired before the campaign could reach them** — they can only be recovered by
+phone or an approved WhatsApp template. Call list:
+`_incident-2026-08-22-whatsapp-ai-outage-DATA-DO-NOT-COMMIT/EXPIRED-leads-call-list.csv`
+(113 rows, 51 flagged HIGH priority: messaged more than once, or already named a destination).
 
 ---
 
 ## Step 3 — Deploy the monitoring so this cannot repeat silently
 
-Branch **`fix/automation-observability`** is pushed and open for PR:
-https://github.com/outboundmanagementsystem-afk/Outbound-Full/pull/new/fix/automation-observability
+Branch **`ops/automation-monitoring`** is pushed and open for PR:
+https://github.com/outboundmanagementsystem-afk/Outbound-Full/pull/new/ops/automation-monitoring
 
 Pushing the branch does **not** deploy — `deploy-backend.yml` only fires on `main`.
 
@@ -111,7 +125,7 @@ Pushing the branch does **not** deploy — `deploy-backend.yml` only fires on `m
    about. Resend's `onboarding@resend.dev` sender works before you verify a domain, so there
    is no reason to wait.
 
-2. Merge the branch to `main`. GitHub Actions applies migration `0042` and reloads PM2.
+2. Merge the branch to `main`. GitHub Actions applies migration `0060` and reloads PM2.
 
 3. Confirm it is live:
 
