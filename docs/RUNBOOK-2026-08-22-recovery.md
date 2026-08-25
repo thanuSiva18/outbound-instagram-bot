@@ -78,17 +78,6 @@ Built-in safety, all verified in production:
 | **Auto-pause** | **3 consecutive Meta rejections and it stops itself** |
 | Failures | recorded with Meta's reason, never blindly retried |
 
-Built-in safety, all verified before handover:
-
-| Guard | Behaviour |
-|---|---|
-| Rate | one message per minute (`MAX_PER_RUN`) |
-| 24h window | re-checked at send time; expired leads are skipped, never sent |
-| Quiet hours | nothing before 9am or after 9pm IST |
-| Duplicate protection | ledger keyed by number; survives stop/start |
-| **Auto-pause** | **3 consecutive Meta rejections and it stops itself** |
-| Failures | recorded with Meta's reason, never blindly retried |
-
 **The 24h window is why speed matters.** WhatsApp only allows free-form messages within 24
 hours of the customer's last message, and the pool drained at roughly 7–10 leads per hour
 while we waited. Because the queue happened to be ordered oldest-first, the leads closest to
