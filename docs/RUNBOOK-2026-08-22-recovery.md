@@ -114,7 +114,7 @@ Pushing the branch does **not** deploy — `deploy-backend.yml` only fires on `m
    about. Resend's `onboarding@resend.dev` sender works before you verify a domain, so there
    is no reason to wait.
 
-2. Merge the branch to `main`. GitHub Actions applies migration `0060` and reloads PM2.
+2. Merge the branch to `main`. GitHub Actions applies migration `0066` and reloads PM2.
 
 3. Confirm it is live:
 
