@@ -55,6 +55,12 @@ All values are **field-picker pills**; only `channel` is typed text.
   `phone:<digits>` so the lead still lands — but a contact who later gives a different
   number then creates a second row. Send the Contact Id.
 - `assignee` is normalised to exactly `Jasmine` / `Jensica`; anything else lands empty.
+- Unresolved merge tags are **stripped, not fatal**: `clean()` removes `{{...}}` and keeps
+  the literal text around it, so `'Rathinavel,{{last_name}}'` lands as `Rathinavel`. A
+  value that is *only* a tag (`'{{full_name}}'`, which is what ManyChat sends for a
+  contact with no name set) still ends up empty — hence the `ig_username` fallback below.
+- `name` falls back: `name` → `first_name` → `ig_username` → `username`. Send the Username
+  field in the body or a nameless contact produces a blank column A.
 
 ## Leads store (Google Sheet)
 
@@ -73,9 +79,17 @@ All values are **field-picker pills**; only `channel` is typed text.
 
 ## CRM
 
-- Endpoint: `POST https://app.outboundtravelers.com/tms/api/ingest`
-  (the Cloudflare-proxied hostname, **not** the raw VPS IP Faheem's workflow still uses —
-  it survives a VPS IP change, which is what broke the feed on 2026-08-01)
+- Endpoint: `POST https://187-127-191-151.sslip.io/tms/api/ingest`
+  > This was briefly pointed at the Cloudflare-proxied `app.outboundtravelers.com` as an
+  > improvement (it survives a VPS IP change, which is what broke the feed on 2026-08-01).
+  > Reverted 2026-08-29: it timed out from the n8n box. The IP host is the one the sibling
+  > "CRM Sync" workflow uses successfully, so it stays until the proxied host is proven
+  > from n8n rather than from a laptop.
+- **Timeout: 120s, not the 15s Faheem's node shipped with.** Measured latency of this
+  endpoint from n8n on 2026-08-29 across 10 real CRM Sync pushes: min 342ms, **max
+  48,678ms**, avg 17,792ms — 4 of 10 exceeded 15s. The original cap would have silently
+  failed roughly 40% of qualified leads. ⚠️ The endpoint being that slow is itself a
+  TMS-side problem worth chasing; 120s is a tourniquet, not a cure.
 - Credential in n8n: **"Custom CRM Ingest Key (X-Api-Key)"** (`gI20n2XCpu3GzUFZ`)
 - `source: "instagram3"` / `"facebook3"`, `campaign: "hakeem-fb-ig"`
 - The source enum is enforced server-side; anything else returns **422**. Added in
@@ -99,9 +113,29 @@ All values are **field-picker pills**; only `channel` is typed text.
 - Sheet tab `2112455396` readable and writable by the service account; all 8 mapped
   columns landed correctly (execution `287387`)
 - CRM gate correctly **closed** on an invalid phone — no push, no partial lead
+- Merge-tag stripping: `'ZZ TESTNAME,{{last_name}}'` → `ZZ TESTNAME` (execution `287425`)
+- **CRM path reachable end to end** (execution `287432`): the push completed and returned
+  a real HTTP response, so credential, URL and body shape are all correct.
+
+## The one remaining blocker
+
+Execution `287432` came back **422**:
+
+```
+source is required and must be one of:
+  whatsapp, instagram_in, instagram_main, facebook, website
+```
+
+Production is running only five sources — it does not have `instagram2`/`facebook2`
+either. Commit `5267cad` ("accept instagram2 / facebook2", 2026-08-27) was committed to
+`crm/faheem-lead-source`, never merged to `main` and never deployed; `DEPLOY_LOG.md` has
+no entry for it. So **neither partner account can reach the CRM today**, and the single
+TMS deploy of `crm/hakeem-lead-source` unblocks both at once.
+
+That same execution also measured the push at **90,947ms**. Anything under a ~2 minute
+timeout would have dropped it.
 
 ## NOT yet verified
 
-- **The CRM push has never run.** It is blocked until `instagram3`/`facebook3` ship to
-  production. Until then every qualified lead writes `crm_result: FAILED …422`.
+- A successful CRM write (`crm_result: created <uuid>`). Impossible until the deploy.
 - A real end-to-end lead from ManyChat (needs Hakeem's flow pointed at the webhook).
