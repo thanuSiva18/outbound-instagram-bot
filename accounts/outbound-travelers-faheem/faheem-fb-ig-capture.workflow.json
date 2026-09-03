@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-08-29T09:52:22.903Z",
+  "updatedAt": "2026-09-03T08:48:51.428Z",
   "createdAt": "2026-08-27T10:15:53.860Z",
   "id": "rX6hu1ArPRNEwBHP",
   "name": "Outbound — Faheem FB+IG Capture (ManyChat)",
@@ -296,7 +296,7 @@
         "sendBody": true,
         "contentType": "json",
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify((() => { const l = $('Preserve first values').item.json; return { source: (l.channel === 'facebook' ? 'facebook2' : 'instagram2'), campaign: 'faheem-fb-ig', name: l.name, ig_username: l.ig_username, ig_user_id: l.ig_user_id, phone: l.phone_digits, destination: l.destination, travel_date: l.travel_date || '', travelers: '', email: '', status: l.status, notes: l.notes }; })()) }}",
+        "jsonBody": "={{ JSON.stringify((() => { const l = $('Preserve first values').item.json; return { source: (l.channel === 'facebook' ? 'facebook4' : 'instagram4'), campaign: 'faheem-fb-ig', name: l.name, ig_username: l.ig_username, ig_user_id: l.ig_user_id, phone: l.phone_digits, destination: l.destination, travel_date: l.travel_date || '', travelers: '', email: '', status: l.status, notes: l.notes }; })()) }}",
         "options": {
           "timeout": 120000
         }
@@ -540,8 +540,8 @@
   "staticData": null,
   "meta": null,
   "pinData": null,
-  "versionId": "5cd7ac87-59d4-442b-abb3-3410589f7acc",
-  "versionCounter": 25,
+  "versionId": "8add8306-2227-4e83-9dd6-9d5d7ecced09",
+  "versionCounter": 27,
   "triggerCount": 1,
   "shared": [
     {
@@ -565,7 +565,7 @@
             "userId": "1f2bd6c5-af4f-4a36-8846-17c36547f8ac",
             "projectId": "rB3QZRABO7nl17PH",
             "user": {
-              "updatedAt": "2026-08-29T08:01:23.000Z",
+              "updatedAt": "2026-09-03T08:43:32.000Z",
               "createdAt": "2025-11-28T05:42:24.767Z",
               "id": "1f2bd6c5-af4f-4a36-8846-17c36547f8ac",
               "email": "outboundtravelers1@gmail.com",
@@ -600,7 +600,7 @@
               },
               "disabled": false,
               "mfaEnabled": false,
-              "lastActiveAt": "2026-08-28",
+              "lastActiveAt": "2026-09-02",
               "isPending": false
             }
           }

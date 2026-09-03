@@ -103,7 +103,7 @@ All values are **field-picker pills**; only `channel` is typed text.
 | n8n workflow | `rX6hu1ArPRNEwBHP` | `0jNVpuJHZyWDrMuf` |
 | Webhook path | `faheem-lead-bot` | `hakeem-lead-bot` |
 | Sheet tab gid | `115831154` | `2112455396` |
-| CRM sources | `instagram2` / `facebook2` | `instagram3` / `facebook3` |
+| CRM sources | `instagram4` / `facebook4` | `instagram3` / `facebook3` |
 | CRM campaign | `faheem-fb-ig` | `hakeem-fb-ig` |
 | ManyChat account | Faheem's | Hakeem's (separate custom fields) |
 
@@ -117,7 +117,24 @@ All values are **field-picker pills**; only `channel` is typed text.
 - **CRM path reachable end to end** (execution `287432`): the push completed and returned
   a real HTTP response, so credential, URL and body shape are all correct.
 
-## The one remaining blocker
+## Renumbered 2026-09-03
+
+Faheem's sources moved `instagram2`/`facebook2` → **`instagram4`/`facebook4`** at the
+owner's request; Hakeem stays on `instagram3`/`facebook3`. The old pair is retired, not
+kept as a spare — nothing had ever been ingested under them (see the Faheem note below),
+so there was no history to preserve. Changed in the n8n workflow and in
+`ALLOWED_SOURCES`; both must ship together or Faheem's pushes 422.
+
+> ⚠️ **Faheem's flow still does not produce CRM leads, and this renumber does not fix
+> that.** As of 2026-09-03 his ManyChat still sends `"destination": "{{cuf_14910935}}"`
+> unresolved — 26 of 26 sampled executions across 2026-09-01→03 had a blank destination
+> and **zero** reached `Push to CRM`. `crm_ready = destination && phone`, so every lead
+> stops at the gate and sits in the sheet at `in_progress`. The fix is in *his* ManyChat
+> account: re-pick the destination field with the field picker, the way Hakeem's
+> `destination1` pill already works. Hakeem's flow is healthy — 10 of 10 recent leads
+> reached the CRM and were `created`.
+
+## Resolved blocker (kept for the record)
 
 Execution `287432` came back **422**:
 
