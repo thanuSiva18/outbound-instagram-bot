@@ -156,3 +156,21 @@ timeout would have dropped it.
 
 - A successful CRM write (`crm_result: created <uuid>`). Impossible until the deploy.
 - A real end-to-end lead from ManyChat (needs Hakeem's flow pointed at the webhook).
+
+## Booking intent (ERP lead priority) — added 2026-10-29
+
+Same question as the main page ([`../outbound-travelers-main/booking-intent.md`](../outbound-travelers-main/booking-intent.md)),
+asked as a typed reply ("1 / 2 / 3") just before the WhatsApp number in both
+"Hakkim's new insta flow" and "Hakkim's new FB flow".
+
+- ManyChat field **`booking_intent`** (text) — id **`15112834`** in Hakeem's account. Body line
+  `"booking_intent": "{{booking_intent}}"` must use Hakeem's own field picker.
+- `Normalize` parses the reply → `within_day` / `within_week` / `enquiring`, or `''` when unclear.
+- `Preserve first values` keeps an earlier answer if a later message has none, and builds the label.
+- `Save lead` writes the label to the **`Booking Intent`** column (after `Travel date`).
+- `Push to CRM` adds `booking_intent` only when non-empty.
+- ⚠️ Repeat clients are not re-pushed (`push_now` fires once), so a more urgent second answer
+  does not reach the ERP for Hakeem. Known gap.
+- ⚠️ **Never add/rename sheet columns without updating `Save lead` in the same minute** — the
+  node fails with "Column names were updated after the node's setup" and the lead is lost
+  (12 leads on 2026-10-29, all replayed).

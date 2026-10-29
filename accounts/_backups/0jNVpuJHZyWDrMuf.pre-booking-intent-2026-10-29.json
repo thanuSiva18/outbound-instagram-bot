@@ -1,0 +1,550 @@
+{
+  "updatedAt": "2026-08-29T09:52:23.418Z",
+  "createdAt": "2026-08-29T09:21:14.334Z",
+  "id": "0jNVpuJHZyWDrMuf",
+  "name": "Outbound — Hakeem FB+IG Capture (ManyChat)",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "id": "webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -620,
+        0
+      ],
+      "parameters": {
+        "path": "hakeem-lead-bot",
+        "httpMethod": "POST",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "9db81aee-4dbc-412c-b70b-037b002516c6"
+    },
+    {
+      "id": "respond-ok",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        -420,
+        -140
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "normalize",
+      "name": "Normalize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -420,
+        60
+      ],
+      "parameters": {
+        "jsCode": "// Normalize one ManyChat message from Hakeem's FB+IG flow into a clean lead.\n//\n// Hakeem's ManyChat automation is fully scripted — it asks for a DESTINATION and a\n// WHATSAPP NUMBER and nothing else. There is no AI in this path, so unlike the\n// chat-and-capture bots there is no travel_date / pax / email to collect.\n//\n// ManyChat posts the literal merge tag (e.g. \"{{cuf_destination}}\") when a field is\n// still empty, so those must be scrubbed or they land in the sheet as junk text.\n\nconst b = $('Webhook').first().json.body || {};\n\nconst clean = (v) => {\n  v = (v == null ? '' : String(v)).trim();\n  // Drop unresolved ManyChat merge tags but KEEP the literal text around them. A contact\n  // with no surname arrives as 'Rathinavel,{{last_name}}' and a page with no name set\n  // arrives as '{{full_name}}' — discarding the whole string threw away the half we\n  // actually had. A value that is nothing BUT a tag still ends up empty, as before.\n  if (v.includes('{{')) {\n    v = v.replace(/\\{\\{[^{}]*\\}\\}/g, '')\n         .replace(/^[\\s,|/·\\-–—]+|[\\s,|/·\\-–—]+$/g, '')\n         .trim();\n  }\n  if (/^(null|undefined)$/i.test(v)) return '';\n  return v;\n};\n\n// The Contact Id is the PREFERRED row key, but ManyChat's External Request only sends it\n// when someone remembers to add the field — and a body without it used to throw here,\n// silently dropping the whole lead. Proven on the Faheem flow on 2026-08-29:\n// five leads were lost exactly this way before the fallback below existed.\nconst manychat_id = clean(b.ig_user_id) || clean(b.subscriber_id);\n\nconst destination = clean(b.destination);\nconst travel_date = clean(b.travel_date || b.travelDate);\n\n// phone: digits only, strip a leading 00 international prefix\nlet phone_digits = clean(b.contact_number || b.phone || b.whatsapp_number).replace(/\\D/g, '');\nif (phone_digits.startsWith('00')) phone_digits = phone_digits.slice(2);\n// Canonicalise to country-code form BEFORE it goes anywhere. This flow posts straight\n// to /tms/api/ingest and never passes through the CRM Sync normalizer the other bots\n// rely on, so an uncorrected '09876543210' would reach sales undiallable.\nif (phone_digits.length === 11 && phone_digits.startsWith('0')) phone_digits = '91' + phone_digits.slice(1);\nelse if (phone_digits.length === 10 && /^[6-9]/.test(phone_digits)) phone_digits = '91' + phone_digits;\nconst phone_valid = phone_digits.length >= 11;\n\n// Fall back to the canonicalised phone as the row key. It is the one value this flow\n// always collects, so Append-or-Update still dedupes a returning contact — just on the\n// number instead of the Contact Id. The 'phone:' prefix keeps the two key spaces apart,\n// so a real Contact Id can never collide with a number.\nconst ig_user_id = manychat_id || (phone_digits ? 'phone:' + phone_digits : '');\nif (!ig_user_id) {\n  // Only unkeyable now: no Contact Id AND no phone at all. Such a row would duplicate\n  // on every message, so it is still worth failing loudly.\n  throw new Error('no ig_user_id/subscriber_id and no usable phone — cannot key the sheet row');\n}\n\n// Display format, matching the other flows: '+91 xxxxx xxxxx' for Indian mobiles.\nlet whatsapp_number = '';\nif (phone_valid) {\n  let d = phone_digits;\n  if (d.length === 12 && d.startsWith('91')) d = d.slice(2);\n  else if (d.length === 11 && d.startsWith('0')) d = d.slice(1);\n  whatsapp_number = (d.length === 10 && /^[6-9]/.test(d))\n    ? '+91 ' + d.slice(0, 5) + ' ' + d.slice(5)\n    : '+' + phone_digits;\n}\n\n// Assignee must match the sheet values exactly — normalize casing/spelling drift.\nconst a = clean(b.assignee);\nconst assignee = /^jasmine$/i.test(a) ? 'Jasmine'\n  : /^jen?s?n?ica$/i.test(a) ? 'Jensica'\n  : a;\n\n// Channel: Hakeem's account runs Facebook AND Instagram through ManyChat.\nconst rawCh = clean(b.channel).toLowerCase();\nconst channel = rawCh.includes('face') || rawCh === 'fb' ? 'facebook'\n  : rawCh.includes('insta') || rawCh === 'ig' ? 'instagram'\n  : 'instagram';\n\n// A lead is ready for the CRM once we can NAME it and CALL it. That is everything\n// this flow collects — gating on travel_date/pax/email (as the viral template does)\n// would mean no Hakeem lead ever reaches the CRM.\nconst crm_ready = Boolean(destination && phone_valid);\nconst any_field = Boolean(destination || phone_digits);\nconst status = crm_ready ? 'qualified' : (any_field ? 'in_progress' : 'new');\n\nconst now = new Date();\nconst ist = new Date(now.getTime() + 5.5 * 3600 * 1000).toISOString().replace('T', ' ').slice(0, 19);\n\nreturn [{\n  json: {\n    ig_user_id,\n    ig_username: clean(b.ig_username) || clean(b.username),\n    // Last resort: the handle. A rep can work a lead called '@softseason'; they cannot\n    // work a blank row.\n    name: clean(b.name) || clean(b.first_name) || clean(b.ig_username) || clean(b.username),\n    destination,\n    travel_date,\n    phone_digits,\n    whatsapp_number,\n    assignee,\n    channel,\n    status,\n    crm_ready,\n    ts: ist,\n    step: clean(b.step),\n    // 'Month YYYY' in IST — identical format to the other tabs in this spreadsheet.\n    lead_date: (() => {\n      const t = new Date(Date.now() + 5.5 * 3600 * 1000);\n      return t.toLocaleString('en-US', { month: 'long', timeZone: 'UTC' }) + ' ' + t.getUTCFullYear();\n    })(),\n  },\n}];"
+      }
+    },
+    {
+      "id": "lookup-existing-row",
+      "name": "Lookup existing row",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -200,
+        60
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U",
+          "mode": "list",
+          "cachedResultName": "Lead manager"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 2112455396,
+          "mode": "list",
+          "cachedResultName": "hakeem leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U/edit#gid=2112455396"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "ig_user_id",
+              "lookupValue": "={{ $json.ig_user_id }}"
+            }
+          ]
+        },
+        "options": {},
+        "authentication": "serviceAccount"
+      },
+      "credentials": {
+        "googleApi": {
+          "id": "SjmGyVegUeZAEzO7",
+          "name": "Google Sheets (Service Account)"
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "preserve-first-values",
+      "name": "Preserve first values",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        20,
+        60
+      ],
+      "parameters": {
+        "jsCode": "// Never let a later, emptier message blank out something we already captured.\n// ManyChat fires this webhook at EVERY step, so the \"destination\" message carries no\n// phone and the \"phone\" message may carry no destination. Without this, each step\n// would overwrite the previous one's answer with ''.\n\nconst fresh = $('Normalize').first().json;\nconst rows = $('Lookup existing row').all();\nconst prev = (rows.length && rows[0].json && rows[0].json.ig_user_id) ? rows[0].json : {};\n\nconst keep = (a, b) => (a && String(a).trim() !== '') ? a : (b || '');\n\nconst destination     = keep(fresh.destination, prev.Destination);\nconst travel_date     = keep(fresh.travel_date, prev['Travel date']);\nconst phone_digits    = keep(fresh.phone_digits, String(prev.Number || '').replace(/\\D/g, ''));\nconst whatsapp_number = keep(fresh.whatsapp_number, prev.Number);\nconst assignee        = keep(fresh.assignee, prev.Assignee);\nconst name            = keep(fresh.name, prev['Name']);\nconst ig_username     = keep(fresh.ig_username, prev.ig_username);\nconst lead_date       = keep(prev['Lead date'], fresh.lead_date);\n\nconst phone_valid = String(phone_digits).length >= 10;\nconst crm_ready   = Boolean(destination && phone_valid);\nconst status      = crm_ready ? 'qualified'\n                  : ((destination || phone_digits) ? 'in_progress' : 'new');\n\n// Keep the ORIGINAL first-contact timestamp once a row exists.\nconst first_contact_ts = keep(prev['Lead date'], fresh.lead_date);\n\n// Only push to the CRM on the turn we BECOME ready, not on every later message.\nconst was_ready = String(prev.Status || prev.status || '') === 'qualified';\nconst push_now  = crm_ready && !was_ready;\n\nreturn [{\n  json: {\n    ...fresh,\n    name, ig_username, destination, travel_date, phone_digits, whatsapp_number, assignee,\n    status, crm_ready, push_now, first_contact_ts, lead_date,\n    notes: 'Hakeem FB/IG lead (ManyChat scripted flow). Destination: '\n      + (destination || '-') + ' | Assigned to ' + (assignee || '-') + '.',\n  },\n}];"
+      }
+    },
+    {
+      "id": "save-lead",
+      "name": "Save lead",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        240,
+        60
+      ],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U",
+          "mode": "list",
+          "cachedResultName": "Lead manager"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 2112455396,
+          "mode": "list",
+          "cachedResultName": "hakeem leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U/edit#gid=2112455396"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "ig_user_id"
+          ],
+          "value": {
+            "ig_user_id": "={{ $json.ig_user_id }}",
+            "Name": "={{ $json.name }}",
+            "Destination": "={{ $json.destination }}",
+            "Travel date": "={{ $json.travel_date }}",
+            "Number": "={{ $json.phone_digits }}",
+            "Lead date": "={{ $json.lead_date }}",
+            "Assignee": "={{ $json.assignee }}",
+            "Status": "={{ $json.status }}"
+          },
+          "schema": [
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Destination",
+              "displayName": "Destination",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Travel date",
+              "displayName": "Travel date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Number",
+              "displayName": "Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Lead date",
+              "displayName": "Lead date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Assignee",
+              "displayName": "Assignee",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "crm_result",
+              "displayName": "crm_result",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ig_user_id",
+              "displayName": "ig_user_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {},
+        "authentication": "serviceAccount"
+      },
+      "credentials": {
+        "googleApi": {
+          "id": "SjmGyVegUeZAEzO7",
+          "name": "Google Sheets (Service Account)"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "id": "ready-for-crm-",
+      "name": "Ready for CRM?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        460,
+        60
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "crm-ready",
+              "leftValue": "={{ $('Preserve first values').item.json.push_now }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "push-to-crm",
+      "name": "Push to CRM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        680,
+        -40
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://187-127-191-151.sslip.io/tms/api/ingest",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify((() => { const l = $('Preserve first values').item.json; return { source: (l.channel === 'facebook' ? 'facebook3' : 'instagram3'), campaign: 'hakeem-fb-ig', name: l.name, ig_username: l.ig_username, ig_user_id: l.ig_user_id, phone: l.phone_digits, destination: l.destination, travel_date: l.travel_date || '', travelers: '', email: '', status: l.status, notes: l.notes }; })()) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "gI20n2XCpu3GzUFZ",
+          "name": "Custom CRM Ingest Key (X-Api-Key)"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "notes": "source='faheem_fb_ig' so Faheem's leads are separable in the CRM. The other bots leave source unset and all land as 'instagram_in'."
+    },
+    {
+      "id": "write-crm-result",
+      "name": "Write crm_result",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        900,
+        -40
+      ],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U",
+          "mode": "list",
+          "cachedResultName": "Lead manager"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 2112455396,
+          "mode": "list",
+          "cachedResultName": "hakeem leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1GBSVxZXVFfPpOUKBHMNoPYoqXmGiOyMV8jptXHy6K5U/edit#gid=2112455396"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "ig_user_id"
+          ],
+          "value": {
+            "ig_user_id": "={{ $('Preserve first values').item.json.ig_user_id }}",
+            "crm_result": "={{ $json.error ? ('FAILED: ' + JSON.stringify($json.error).slice(0,150)) : 'created' }}"
+          },
+          "schema": [
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Destination",
+              "displayName": "Destination",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Travel date",
+              "displayName": "Travel date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Number",
+              "displayName": "Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Lead date",
+              "displayName": "Lead date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Assignee",
+              "displayName": "Assignee",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "crm_result",
+              "displayName": "crm_result",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ig_user_id",
+              "displayName": "ig_user_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {},
+        "authentication": "serviceAccount"
+      },
+      "credentials": {
+        "googleApi": {
+          "id": "SjmGyVegUeZAEzO7",
+          "name": "Google Sheets (Service Account)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Normalize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize": {
+      "main": [
+        [
+          {
+            "node": "Lookup existing row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup existing row": {
+      "main": [
+        [
+          {
+            "node": "Preserve first values",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preserve first values": {
+      "main": [
+        [
+          {
+            "node": "Save lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save lead": {
+      "main": [
+        [
+          {
+            "node": "Ready for CRM?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ready for CRM?": {
+      "main": [
+        [
+          {
+            "node": "Push to CRM",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Push to CRM": {
+      "main": [
+        [
+          {
+            "node": "Write crm_result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Kolkata",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true,
+    "errorWorkflow": "f8JebCcUmgk137Li",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": null,
+  "pinData": {},
+  "versionId": "6c932aa3-7ca5-4816-b5a4-49400524be2f",
+  "versionCounter": 10,
+  "triggerCount": 1,
+  "tags": []
+}
