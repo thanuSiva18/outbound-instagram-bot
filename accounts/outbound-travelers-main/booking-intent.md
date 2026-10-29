@@ -59,3 +59,15 @@ Do this in **every** flow whose External Request posts to the `5d6ecc00-…` web
 - [ ] Repeat client with a more urgent second answer — with ERP team once their feature is on
 - [ ] ERP team told the live start date (2026-10-29)
 - [ ] Same work on `.in`, partner and WhatsApp bots
+
+## Rollout to the other accounts (2026-10-29)
+
+| Account | ManyChat field id | n8n | Sheet column | ERP source | Verified live |
+|---|---|---|---|---|---|
+| Main IG + FB | `15112365` | `8yGvAmoeoeT4pI2K` (Webhook3) | New IG Leads 6 | `instagram_main` | ✅ |
+| `.in` IG (@outboundtravelers.in) | `15113069` | same Webhook3 — no n8n change | New IG Leads 6 | `instagram_main` | ✅ 17:54 UTC |
+| Hakeem IG + FB | `15112834` | `0jNVpuJHZyWDrMuf` | hakeem leads | `instagram3` / `facebook3` | ✅ IG · FB only via ERP test mode |
+| Faheem IG + FB | `15113052` | `rX6hu1ArPRNEwBHP` | faheem leads | `instagram4` / `facebook4` | ✅ IG + FB |
+
+Hakeem/Faheem push a contact to the ERP once (`push_now`), so a repeat client's more urgent
+answer does not reach the ERP. `.in` leads are tagged `instagram_main` by the shared Webhook3 path.
