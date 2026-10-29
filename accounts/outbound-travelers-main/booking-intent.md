@@ -71,3 +71,24 @@ Do this in **every** flow whose External Request posts to the `5d6ecc00-…` web
 
 Hakeem/Faheem push a contact to the ERP once (`push_now`), so a repeat client's more urgent
 answer does not reach the ERP. `.in` leads are tagged `instagram_main` by the shared Webhook3 path.
+
+## WhatsApp bot (2026-10-30)
+
+The WhatsApp bot (`HfFqcCEDZJIoGd8e`) runs the conversation itself, so the question lives in n8n:
+
+- **Order:** destination → month → pax → **booking question (3 reply buttons)** → quick assistance Yes/No.
+  Typed `1`/`2`/`3`, "tomorrow", "just enquiring" etc. also count. Ignored twice → `no_response`
+  (never sent to the ERP) and the bot moves on, so a lead never stalls.
+- **State:** `Normalize input` reads it (sheet column `booking_intent` once it exists, else the
+  `biDone` static cache); `Parse + validate` asks it; `Button handler` stores it, pushes again and
+  sends the Yes/No buttons. The answer is never put in the AI prompt.
+- **CRM Sync** (`yH0weFfeYiobqdZq`): `Normalize for CRM` validates the value; a *new* booking answer
+  passes the 15-min per-phone guard as **ERP-only** (`erp_only`, the new `Workpex too?` IF skips
+  Workpex), so Workpex never gets a duplicate. Verified in ERP test mode: `parsed.bookingIntent`.
+- **Sheet:** WhatsApp leads live in spreadsheet `1B2bpou1p6ZISE0nGWjxhSY23ezlzjuysDtZ9AuB4EVg`, tab
+  `whatsapp`. The `booking_intent` header must go in **Q1 (after `notes - AI`)** — appending at the
+  end is safe; n8n's check compares columns by position, so inserting in the middle breaks saving.
+  The sheet mapping is deployed only after Q1 exists.
+- **Loop guard (2026-10-30):** AbhiBus's WhatsApp auto-reply bot ping-ponged with Rahul for 1h+,
+  burning OpenAI and Sheets quota ("too many requests" for real leads). `Normalize input` now ignores
+  that sender and any number sending the exact same text 3+ times in 30 min.
