@@ -86,7 +86,7 @@ The WhatsApp bot (`HfFqcCEDZJIoGd8e`) runs the conversation itself, so the quest
   passes the 15-min per-phone guard as **ERP-only** (`erp_only`, the new `Workpex too?` IF skips
   Workpex), so Workpex never gets a duplicate. Verified in ERP test mode: `parsed.bookingIntent`.
 - **Sheet:** WhatsApp leads live in spreadsheet `1B2bpou1p6ZISE0nGWjxhSY23ezlzjuysDtZ9AuB4EVg`, tab
-  `whatsapp`. The `booking_intent` header must go in **Q1 (after `notes - AI`)** — appending at the
+  `whatsapp`. The **`Booking Intent`** header is in **Q1 (after `notes - AI`)**, added 2026-10-30 — appending at the
   end is safe; n8n's check compares columns by position, so inserting in the middle breaks saving.
   The sheet mapping is deployed only after Q1 exists.
 - **Loop guard (2026-10-30):** AbhiBus's WhatsApp auto-reply bot ping-ponged with Rahul for 1h+,
